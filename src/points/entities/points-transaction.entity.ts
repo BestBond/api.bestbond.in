@@ -8,7 +8,10 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 
-export type PointsTransactionType = 'COUPON_SCAN' | 'REWARD_REDEEM';
+export type PointsTransactionType =
+  | 'COUPON_SCAN'
+  | 'REWARD_REDEEM'
+  | 'REDEMPTION_REFUND';
 
 @Entity({ name: 'points_transactions' })
 export class PointsTransaction {

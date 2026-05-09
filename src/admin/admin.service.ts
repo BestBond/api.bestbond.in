@@ -1,13 +1,22 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import type { AuthUser } from '../auth/auth-user';
 import { UsersService } from '../users/users.service';
 import { RbacService } from '../rbac/rbac.service';
+import { PointsService } from '../points/points.service';
 import { PointsTransaction } from '../points/entities/points-transaction.entity';
 import { Redemption } from '../rewards/entities/redemption.entity';
+import { Reward } from '../rewards/entities/reward.entity';
 import { User } from '../users/entities/user.entity';
+import { Coupon } from '../coupons/entities/coupon.entity';
 
 function startOfDay(d: Date): Date {
   const x = new Date(d);
@@ -26,34 +35,57 @@ function percentVsPriorPeriod(current: number, prior: number): number {
   return Math.round(((current - prior) / prior) * 1000) / 10;
 }
 
+function isFullAdminUser(auth: AuthUser): boolean {
+  const p = new Set(auth.permissions ?? []);
+  return p.has('rbac.manage') || p.has('users.manage');
+}
+
+function assertOpsCanAccessDealerRedemption(auth: AuthUser, r: Redemption) {
+  if (isFullAdminUser(auth)) return;
+  if (r.channel !== 'DEALER_STORE') {
+    throw new ForbiddenException('Not allowed to access this redemption');
+  }
+}
+
 @Injectable()
 export class AdminService {
   constructor(
+    private readonly dataSource: DataSource,
     private readonly users: UsersService,
     private readonly rbac: RbacService,
+    private readonly points: PointsService,
     @InjectRepository(PointsTransaction)
     private readonly txRepo: Repository<PointsTransaction>,
     @InjectRepository(Redemption)
     private readonly redemptionRepo: Repository<Redemption>,
+    @InjectRepository(Reward)
+    private readonly rewardRepo: Repository<Reward>,
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
+    @InjectRepository(Coupon)
+    private readonly couponRepo: Repository<Coupon>,
   ) {}
 
-  async listRedemptionRequests(params: {
-    status?: string;
-    take: number;
-    offset: number;
-    sort?: string;
-    flaggedOnly?: boolean;
-    flagMinPoints?: number;
-  }) {
+  async listRedemptionRequests(
+    auth: AuthUser,
+    params: {
+      status?: string;
+      take: number;
+      offset: number;
+      sort?: string;
+      flaggedOnly?: boolean;
+      flagMinPoints?: number;
+      /** Superadmin only: filter by channel */
+      channel?: 'DEALER_STORE' | 'CUSTOMER_APP' | 'ALL';
+    },
+  ) {
     const status = (params.status ?? 'PROCESSING').trim().toUpperCase();
     const allowed = new Set(['PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED']);
     const statusFilter = allowed.has(status) ? status : 'PROCESSING';
 
     const sortKey = (params.sort ?? 'HIGH_VALUE').trim().toUpperCase();
 
-    // Design uses “Flagged Requests” toggle; backend does not yet persist flags.
+    // Design uses "Flagged Requests" toggle; backend does not yet persist flags.
     // Provide a computed flag based on points cost with an overrideable threshold.
     const flagMin = params.flagMinPoints ?? 50_000;
 
@@ -63,6 +95,15 @@ export class AdminService {
       .leftJoinAndSelect('r.user', 'user')
       .where('r.status = :status', { status: statusFilter });
 
+    if (!isFullAdminUser(auth)) {
+      qb.andWhere('r.channel = :dealerCh', { dealerCh: 'DEALER_STORE' });
+    } else {
+      const ch = (params.channel ?? 'ALL').toUpperCase();
+      if (ch === 'DEALER_STORE' || ch === 'CUSTOMER_APP') {
+        qb.andWhere('r.channel = :chFilter', { chFilter: ch });
+      }
+    }
+
     if (params.flaggedOnly) {
       qb.andWhere('r.pointsCost >= :minPts', { minPts: flagMin });
     }
@@ -70,7 +111,7 @@ export class AdminService {
     if (sortKey === 'NEWEST') {
       qb.orderBy('r.createdAt', 'DESC');
     } else {
-      // Default matches Figma “Sort By: High Value”
+      // Default matches Figma "Sort By: High Value"
       qb.orderBy('r.pointsCost', 'DESC').addOrderBy('r.createdAt', 'DESC');
     }
 
@@ -97,6 +138,7 @@ export class AdminService {
         itemName: r.reward?.title ?? 'Reward',
         requester,
         status: r.status,
+        channel: r.channel,
         createdAt: r.createdAt,
         duplicate: false,
         flagged: flaggedComputed,
@@ -107,6 +149,7 @@ export class AdminService {
   }
 
   async getRedemptionRequestById(
+    auth: AuthUser,
     id: string,
     opts?: { flagMinPoints?: number },
   ) {
@@ -115,6 +158,7 @@ export class AdminService {
       relations: { reward: true, user: true },
     });
     if (!r) throw new NotFoundException('Redemption not found');
+    assertOpsCanAccessDealerRedemption(auth, r);
 
     const flagMin = opts?.flagMinPoints ?? 50_000;
     const trackingDigits = (r.trackingId ?? '').replace(/\D/g, '');
@@ -154,6 +198,7 @@ export class AdminService {
       id: r.id,
       code,
       status: r.status,
+      channel: r.channel,
       statusLabel,
       statusMessage,
       flagged: r.pointsCost >= flagMin,
@@ -174,9 +219,13 @@ export class AdminService {
     };
   }
 
-  async approveRedemptionRequest(id: string) {
-    const r = await this.redemptionRepo.findOne({ where: { id } });
+  async approveRedemptionRequest(auth: AuthUser, id: string) {
+    const r = await this.redemptionRepo.findOne({
+      where: { id },
+      relations: { user: true, reward: true },
+    });
     if (!r) throw new NotFoundException('Redemption not found');
+    assertOpsCanAccessDealerRedemption(auth, r);
     if (r.status !== 'PROCESSING') {
       throw new BadRequestException('Only PROCESSING requests can be approved');
     }
@@ -191,9 +240,13 @@ export class AdminService {
     return { id: saved.id, code, status: saved.status };
   }
 
-  async deliverRedemptionRequest(id: string) {
-    const r = await this.redemptionRepo.findOne({ where: { id } });
+  async deliverRedemptionRequest(auth: AuthUser, id: string) {
+    const r = await this.redemptionRepo.findOne({
+      where: { id },
+      relations: { user: true, reward: true },
+    });
     if (!r) throw new NotFoundException('Redemption not found');
+    assertOpsCanAccessDealerRedemption(auth, r);
     if (r.status !== 'SHIPPED') {
       throw new BadRequestException(
         'Only SHIPPED (approved) requests can be marked as delivered',
@@ -208,21 +261,147 @@ export class AdminService {
     return { id: saved.id, code, status: saved.status };
   }
 
-  async rejectRedemptionRequest(id: string) {
-    const r = await this.redemptionRepo.findOne({ where: { id } });
-    if (!r) throw new NotFoundException('Redemption not found');
-    if (r.status !== 'PROCESSING') {
-      throw new BadRequestException('Only PROCESSING requests can be rejected');
+  async rejectRedemptionRequest(auth: AuthUser, id: string) {
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Redemption);
+      const r = await repo.findOne({
+        where: { id },
+        relations: { user: true, reward: true },
+      });
+      if (!r) throw new NotFoundException('Redemption not found');
+      assertOpsCanAccessDealerRedemption(auth, r);
+      if (r.status !== 'PROCESSING') {
+        throw new BadRequestException('Only PROCESSING requests can be rejected');
+      }
+      r.status = 'CANCELLED';
+      await repo.save(r);
+
+      await this.points.creditWithManager(manager, {
+        userId: r.user.id,
+        points: r.pointsCost,
+        title: `Refund: redemption rejected (${r.reward?.title ?? 'reward'})`,
+        type: 'REDEMPTION_REFUND',
+      });
+
+      const trackingDigits = (r.trackingId ?? '').replace(/\D/g, '');
+      const code = trackingDigits
+        ? `REQ-${trackingDigits}`
+        : `REQ-${String(r.id).slice(0, 4).toUpperCase()}`;
+
+      return { id: r.id, code, status: r.status };
+    });
+  }
+
+  /**
+   * Ops/Superadmin: record a dealer’s in-store redemption (debited immediately; queued for approval).
+   */
+  async createDealerStoreRedemption(params: {
+    dealerUserId: string;
+    rewardId: string;
+    deliveryLabel?: string | null;
+    deliveryAddress?: string | null;
+  }) {
+    return this.dataSource.transaction(async (manager) => {
+      const usersRepo = manager.getRepository(User);
+      const rewardRepo = manager.getRepository(Reward);
+      const redemptionsRepo = manager.getRepository(Redemption);
+
+      const dealer = await usersRepo.findOne({
+        where: { id: params.dealerUserId },
+        relations: { roles: true },
+      });
+      if (!dealer) throw new NotFoundException('Dealer not found');
+      const isDealer = (dealer.roles ?? []).some((role) => role.name === 'DEALER');
+      if (!isDealer) {
+        throw new BadRequestException('Selected user is not a dealer account');
+      }
+      if (!dealer.isActive) {
+        throw new BadRequestException('Dealer account is suspended');
+      }
+
+      const reward = await rewardRepo.findOne({
+        where: { id: params.rewardId, isActive: true },
+      });
+      if (!reward) throw new NotFoundException('Reward not found');
+
+      if ((dealer.loyaltyPoints ?? 0) < reward.pointsCost) {
+        throw new BadRequestException('Dealer has insufficient points');
+      }
+
+      await this.points.creditWithManager(manager, {
+        userId: dealer.id,
+        points: -reward.pointsCost,
+        title: `Store redemption pending: ${reward.title}`,
+        type: 'REWARD_REDEEM',
+      });
+
+      const redemption = redemptionsRepo.create({
+        trackingId: this.generateCouponTrackingId(),
+        user: dealer,
+        reward,
+        pointsCost: reward.pointsCost,
+        deliveryLabel: params.deliveryLabel ?? null,
+        deliveryAddress: params.deliveryAddress ?? null,
+        channel: 'DEALER_STORE',
+        status: 'PROCESSING',
+        etaText: null,
+      });
+      const saved = await redemptionsRepo.save(redemption);
+
+      return {
+        id: saved.id,
+        trackingId: saved.trackingId,
+        status: saved.status,
+        channel: saved.channel,
+      };
+    });
+  }
+
+  async searchDealers(params: {
+    q?: string;
+    take: number;
+    offset: number;
+  }) {
+    const q = (params.q ?? '').trim();
+    const qb = this.usersRepo
+      .createQueryBuilder('u')
+      .leftJoin('u.roles', 'r')
+      .where('r.name = :role', { role: 'DEALER' })
+      .andWhere('u.isActive = :active', { active: true });
+
+    if (q.length) {
+      const like = `%${q.toLowerCase()}%`;
+      qb.andWhere(
+        '(LOWER(COALESCE(u.fullName, \'\')) LIKE :like OR LOWER(u.email) LIKE :like OR REPLACE(COALESCE(u.phone, \'\'), \'+\', \'\') LIKE :phoneLike)',
+        {
+          like,
+          phoneLike: `%${q.replace(/\D/g, '')}%`,
+        },
+      );
     }
-    r.status = 'CANCELLED';
-    const saved = await this.redemptionRepo.save(r);
 
-    const trackingDigits = (saved.trackingId ?? '').replace(/\D/g, '');
-    const code = trackingDigits
-      ? `REQ-${trackingDigits}`
-      : `REQ-${String(saved.id).slice(0, 4).toUpperCase()}`;
+    qb.orderBy('u.fullName', 'ASC').addOrderBy('u.email', 'ASC');
 
-    return { id: saved.id, code, status: saved.status };
+    const total = await qb.getCount();
+    const rows = await qb.skip(params.offset).take(params.take).getMany();
+    const hasMore = params.offset + rows.length < total;
+
+    return {
+      total,
+      hasMore,
+      items: rows.map((u) => ({
+        id: u.id,
+        fullName: u.fullName?.trim() || u.email.split('@')[0] || 'Dealer',
+        email: u.email,
+        phone: u.phone ?? null,
+        loyaltyPoints: u.loyaltyPoints ?? 0,
+      })),
+    };
+  }
+
+  private generateCouponTrackingId(): string {
+    const digits = (randomBytes(3).readUIntBE(0, 3) % 90000) + 10000;
+    return `BB-${digits}`;
   }
 
   async listUsers(params: {
@@ -248,9 +427,17 @@ export class AdminService {
     }
 
     if (profession.length && profession.toLowerCase() !== 'all') {
-      qb.andWhere('LOWER(COALESCE(u.profession, \'\')) = :p', {
-        p: profession.toLowerCase(),
-      });
+      const p = profession.toLowerCase().replace(/\s+/g, '');
+      const workerProfessions = ['contractor', 'painter', 'contractor/painter'];
+      if (p === 'contractor/painter') {
+        qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) IN (:...w)', {
+          w: workerProfessions,
+        });
+      } else {
+        qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) = :p', {
+          p: profession.toLowerCase(),
+        });
+      }
     }
 
     qb.orderBy('u.updatedAt', 'DESC').addOrderBy('u.createdAt', 'DESC');
@@ -459,16 +646,18 @@ export class AdminService {
 
   /**
    * Aggregates for superadmin / operational admin home dashboard.
+   * Ops admins (dealer.redemptions.manage only) get the same shape; superadmin-only
+   * onboarding counts are zeroed for them.
    * Windows use server local time.
    */
-  async getDashboardSummary() {
+  async getDashboardSummary(auth: AuthUser) {
     const now = new Date();
     const todayStart = startOfDay(now);
     const last7Start = addDays(now, -7);
     const last14Start = addDays(now, -14);
 
     const pendingApprovalsCount = await this.redemptionRepo.count({
-      where: { status: 'PROCESSING' },
+      where: { status: 'PROCESSING', channel: 'DEALER_STORE' },
     });
 
     const pendingOpsAdminApprovalsCount = await this.usersRepo
@@ -542,9 +731,20 @@ export class AdminService {
       .getRawOne<{ cnt: string }>();
     const couponScansLast5Minutes = Number(scans5mRaw?.cnt ?? 0);
 
-    return {
+    const totalCouponsIssued = await this.couponRepo.count();
+    const receivedRaw = await this.txRepo
+      .createQueryBuilder('t')
+      .select('COUNT(t.id)', 'cnt')
+      .where('t.type = :type', { type: 'COUPON_SCAN' })
+      .andWhere('t.pointsDelta > 0')
+      .getRawOne<{ cnt: string }>();
+    const totalCouponsReceived = Number(receivedRaw?.cnt ?? 0);
+
+    const payload = {
       pendingApprovalsCount,
       pendingOpsAdminApprovalsCount,
+      totalCouponsIssued,
+      totalCouponsReceived,
       pointsIssued: {
         totalLast7Days: issuedThis,
         percentVsPriorWeek: percentVsPriorPeriod(issuedThis, issuedPrior),
@@ -562,6 +762,11 @@ export class AdminService {
         last5MinutesCount: couponScansLast5Minutes,
       },
     };
+
+    if (!isFullAdminUser(auth)) {
+      return { ...payload, pendingOpsAdminApprovalsCount: 0 };
+    }
+    return payload;
   }
 
   async listPendingOperationalAdmins(params?: { take?: number; offset?: number }) {

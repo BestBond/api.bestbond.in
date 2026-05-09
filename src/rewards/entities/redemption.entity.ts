@@ -16,6 +16,9 @@ export type RedemptionStatus =
   | 'DELIVERED'
   | 'CANCELLED';
 
+/** CUSTOMER_APP: contractor/painter redeems in-app (no ops approval). DEALER_STORE: ops records redemption at store; requires ops approval queue. */
+export type RedemptionChannel = 'CUSTOMER_APP' | 'DEALER_STORE';
+
 @Entity({ name: 'redemptions' })
 export class Redemption {
   @PrimaryGeneratedColumn('uuid')
@@ -43,6 +46,9 @@ export class Redemption {
 
   @Column({ type: 'text', default: 'PROCESSING' })
   status!: RedemptionStatus;
+
+  @Column({ name: 'channel', type: 'text', default: 'CUSTOMER_APP' })
+  channel!: RedemptionChannel;
 
   @Column({ name: 'eta_text', type: 'text', nullable: true })
   etaText!: string | null; // e.g. "5-7 Business Days"

@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { Public } from './public.decorator';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
@@ -12,6 +12,13 @@ import { CustomerOtpLoginDto } from './dto/customer-otp-login.dto';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  /** Whether first Super Admin signup is allowed (no SUPERADMIN in DB yet). */
+  @Public()
+  @Get('superadmin/bootstrap-available')
+  superadminBootstrapAvailable() {
+    return this.auth.isSuperadminBootstrapAvailable();
+  }
+
   /** Mobile: request OTP to verify phone */
   @Public()
   @Post('otp/request')
@@ -19,7 +26,7 @@ export class AuthController {
     return this.auth.requestOtp({ phone: dto.phone, countryCode: dto.countryCode });
   }
 
-  /** Management mobile onboarding: phone + OTP + password -> admin session */
+  /** Management mobile onboarding: phone + OTP -> ops pending approval (no user password). */
   @Public()
   @Post('admin/otp/signup')
   signupAdminWithOtp(@Body() dto: AdminOtpSignupDto) {
@@ -32,7 +39,7 @@ export class AuthController {
     });
   }
 
-  /** Management login: phone + OTP only (no PIN/password). */
+  /** Management login: phone + OTP; SUPERADMIN also requires password. */
   @Public()
   @Post('admin/otp/login')
   loginAdminWithOtp(@Body() dto: AdminOtpLoginDto) {
@@ -40,6 +47,7 @@ export class AuthController {
       phone: dto.phone,
       countryCode: dto.countryCode,
       code: dto.code,
+      password: dto.password,
     });
   }
 
@@ -56,6 +64,7 @@ export class AuthController {
       code: dto.code,
       fullName: dto.fullName,
       email: dto.email,
+      password: dto.password,
     });
   }
 
@@ -69,6 +78,8 @@ export class AuthController {
       code: dto.code,
       fullName: dto.fullName ?? null,
       email: dto.email ?? null,
+      profession: dto.profession ?? null,
+      deliveryAddress: dto.deliveryAddress ?? null,
     });
   }
 

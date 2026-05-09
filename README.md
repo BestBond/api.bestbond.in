@@ -31,6 +31,14 @@
 $ npm install
 ```
 
+Copy environment defaults (optional — repo includes a local `.env` for dev):
+
+```bash
+$ cp .env.example .env
+```
+
+Edit `.env` to set **`DEV_SUPERADMIN_PHONE`** (10 digits) and **`DEV_SUPERADMIN_PASSWORD`** (8+ chars). On startup (non-production), the RBAC seeder creates the first Super Admin at that phone or **syncs the password** for that number if it already has the SUPERADMIN role.
+
 ## Compile and run the project
 
 ```bash
@@ -82,6 +90,13 @@ Check out a few resources that may come in handy when working with NestJS:
 - Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
 - To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
 - Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+
+## Super Admin authentication (BestBond)
+
+- **Login:** `POST /auth/otp/request` then `POST /auth/admin/otp/login` with `phone`, `countryCode`, `code`, and **`password`** (min 8 characters). Operational admins use the same endpoint but **omit** `password`.
+- **First Super Admin:** `GET /auth/superadmin/bootstrap-available` returns `{ allowed: true }` only when no `SUPERADMIN` exists. Then `POST /auth/superadmin/otp/signup` with phone, OTP, `fullName`, `email`, and **`password`** (min 8).
+- **Local dev:** Set `DEV_SUPERADMIN_PHONE` and `DEV_SUPERADMIN_PASSWORD` in `.env` (see `.env.example`). Restart the API so the seeder applies them.
+- **Breaking change (prod):** Super Admins need a real `passwordHash`; use bootstrap signup or a controlled DB migration — the dev seeder does not run in production.
 
 ## Support
 

@@ -1,4 +1,4 @@
-import { IsString, Length, Matches, MaxLength } from 'class-validator';
+import { IsString, Length, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class SuperadminOtpSignupDto {
   @IsString()
@@ -20,5 +20,10 @@ export class SuperadminOtpSignupDto {
   @IsString()
   @MaxLength(100)
   email!: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  password!: string;
 }
 

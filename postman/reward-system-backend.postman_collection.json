@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "c9b60b7d-1f0b-4df5-a920-3ffb4d6e6f61",
     "name": "Reward System Backend",
-    "description": "API collection aligned with OTP-only authentication (2026).\n\n**Public auth:** `POST /auth/otp/request` (returns `devCode` in non-production) → then one of: `auth/superadmin/otp/signup` (web, only if no Super Admin), `auth/admin/otp/signup` (Ops self-register → pending approval), `auth/admin/otp/login` (Super or approved Ops), `auth/customer/otp/signup`, `auth/customer/otp/login`.\n\n**Ops approval:** Super Admin (Bearer) → `GET /admin/operational-admins/pending` → `POST /admin/operational-admins/:id/approve`.\n\n**JWT:** All non-`@Public` routes require `Authorization: Bearer` (e.g. Support, app home, profile).",
+    "description": "API collection (2026).\n\n**Public auth:** `POST /auth/otp/request` → `GET /auth/superadmin/bootstrap-available` (optional) → `auth/superadmin/otp/signup` (first Super Admin only; includes **password** min 8), `auth/admin/otp/signup` (Ops), `auth/admin/otp/login` (**Super:** OTP + **password**; **Ops:** OTP only — omit password), `auth/customer/*`.\n\n**Ops approval:** Super Admin (Bearer) → `GET /admin/operational-admins/pending` → `POST /admin/operational-admins/:id/approve`.\n\n**JWT:** Bearer on protected routes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -45,6 +45,18 @@
           ]
         },
         {
+          "name": "Super Admin — bootstrap available?",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/superadmin/bootstrap-available",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "superadmin", "bootstrap-available"]
+            }
+          }
+        },
+        {
           "name": "Super Admin — OTP Signup (web; fails if Super Admin already exists)",
           "request": {
             "method": "POST",
@@ -56,7 +68,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"countryCode\": \"{{countryCode}}\",\n  \"phone\": \"{{superadminPhone10}}\",\n  \"code\": \"{{mobileDevOtp}}\",\n  \"fullName\": \"{{superadminFullName}}\",\n  \"email\": \"{{superadminEmail}}\"\n}\n"
+              "raw": "{\n  \"countryCode\": \"{{countryCode}}\",\n  \"phone\": \"{{superadminPhone10}}\",\n  \"code\": \"{{mobileDevOtp}}\",\n  \"fullName\": \"{{superadminFullName}}\",\n  \"email\": \"{{superadminEmail}}\",\n  \"password\": \"{{superadminPassword}}\"\n}\n"
             }
           },
           "event": [
@@ -88,7 +100,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"countryCode\": \"{{countryCode}}\",\n  \"phone\": \"{{otpPhone10}}\",\n  \"code\": \"{{mobileDevOtp}}\"\n}\n"
+              "raw": "{\n  \"countryCode\": \"{{countryCode}}\",\n  \"phone\": \"{{otpPhone10}}\",\n  \"code\": \"{{mobileDevOtp}}\",\n  \"password\": \"{{superadminPassword}}\"\n}\n"
             }
           },
           "event": [
@@ -1160,6 +1172,7 @@
     { "key": "superadminPhone10", "value": "9000000000" },
     { "key": "superadminEmail", "value": "admin@admin.in" },
     { "key": "superadminFullName", "value": "Admin" },
+    { "key": "superadminPassword", "value": "DevSuperAdmin1!" },
     { "key": "superadminAccessToken", "value": "" },
 
     { "key": "opsAdminPhone10", "value": "9111111111" },

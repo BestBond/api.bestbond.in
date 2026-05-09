@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,6 +12,7 @@ import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { RbacService } from '../rbac/rbac.service';
 import { OtpCode } from './entities/otp-code.entity';
+import { normalizeAuthPhone } from './phone.util';
 
 @Injectable()
 export class AuthService {
@@ -25,9 +31,10 @@ export class AuthService {
     const code = `${Math.floor(100000 + Math.random() * 900000)}`;
     const codeHash = await bcrypt.hash(code, 10);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    const phone = normalizeAuthPhone(params.countryCode, params.phone);
 
     const rec = this.otpRepo.create({
-      phone: `${params.countryCode}${params.phone}`,
+      phone,
       codeHash,
       expiresAt,
       consumedAt: null,
@@ -49,22 +56,25 @@ export class AuthService {
     fullName?: string | null;
     email?: string | null;
   }) {
-    const fullPhone = `${params.countryCode}${params.phone}`;
+    const fullPhone = normalizeAuthPhone(params.countryCode, params.phone);
     await this.consumeOtp({ fullPhone, code: params.code });
 
-    // OPS ADMIN self-registration: create / update profile but keep gated until SUPERADMIN approval.
-    let user = await this.users.findByPhone(fullPhone);
-    if (!user) {
-      const email =
-        (params.email?.trim() && params.email.trim().length
-          ? params.email.trim()
-          : `${fullPhone.replace(/\+/g, '')}@bestbonds.local`);
-      user = await this.users.createLocalUser({
-        email,
-        phone: fullPhone,
-        passwordHash: await bcrypt.hash(`${fullPhone}:${Date.now()}`, 8),
-      });
+    const existing = await this.users.findByPhone(fullPhone);
+    if (existing) {
+      throw new ConflictException(
+        'This mobile number is already registered. Log in with OTP instead.',
+      );
     }
+
+    const email =
+      (params.email?.trim() && params.email.trim().length
+        ? params.email.trim()
+        : `${fullPhone.replace(/\+/g, '')}@bestbonds.local`);
+    const user = await this.users.createLocalUser({
+      email,
+      phone: fullPhone,
+      passwordHash: await bcrypt.hash(`${fullPhone}:${Date.now()}`, 8),
+    });
 
     const loaded = await this.users.findById(user.id);
     if (!this.hasAdminRole(loaded)) {
@@ -89,8 +99,9 @@ export class AuthService {
     phone: string;
     countryCode: string;
     code: string;
+    password?: string;
   }) {
-    const fullPhone = `${params.countryCode}${params.phone}`;
+    const fullPhone = normalizeAuthPhone(params.countryCode, params.phone);
     await this.consumeOtp({ fullPhone, code: params.code });
 
     const user = await this.users.findByPhone(fullPhone);
@@ -115,6 +126,18 @@ export class AuthService {
         throw new ForbiddenException('Waiting for Super Admin approval.');
       }
     }
+    if (isSuper) {
+      const pw = params.password?.trim() ?? '';
+      if (!pw) {
+        throw new UnauthorizedException(
+          'Password is required for Super Admin accounts.',
+        );
+      }
+      const ok = await bcrypt.compare(pw, loaded.passwordHash);
+      if (!ok) {
+        throw new UnauthorizedException('Invalid password.');
+      }
+    }
     const snap = this.authSnapshot(loaded);
     return {
       accessToken: await this.jwt.signAsync({ sub: user.id, email: user.email }),
@@ -129,31 +152,38 @@ export class AuthService {
     code: string;
     fullName?: string | null;
     email?: string | null;
+    profession?: string | null;
+    deliveryAddress?: string | null;
   }) {
-    const fullPhone = `${params.countryCode}${params.phone}`;
+    const fullPhone = normalizeAuthPhone(params.countryCode, params.phone);
     await this.consumeOtp({ fullPhone, code: params.code });
 
-    let user = await this.users.findByPhone(fullPhone);
-    if (!user) {
-      const email =
-        (params.email?.trim() && params.email.trim().length
-          ? params.email.trim()
-          : `${fullPhone.replace(/\+/g, '')}@bestbonds.local`);
-      user = await this.users.createLocalUser({
-        email,
-        phone: fullPhone,
-        passwordHash: await bcrypt.hash(`${fullPhone}:${Date.now()}`, 8),
-      });
-      await this.ensureDefaultMobileRole(user.id);
-    } else {
-      await this.ensureDefaultMobileRole(user.id);
+    const existing = await this.users.findByPhone(fullPhone);
+    if (existing) {
+      throw new ConflictException(
+        'This mobile number is already registered. Log in with OTP instead.',
+      );
     }
 
+    const email =
+      (params.email?.trim() && params.email.trim().length
+        ? params.email.trim()
+        : `${fullPhone.replace(/\+/g, '')}@bestbonds.local`);
+    const user = await this.users.createLocalUser({
+      email,
+      phone: fullPhone,
+      passwordHash: await bcrypt.hash(`${fullPhone}:${Date.now()}`, 8),
+    });
+    await this.ensureDefaultMobileRole(user.id);
+
     const fullName = params.fullName?.trim() || null;
-    if (fullName) {
+    const profession = params.profession?.trim() || null;
+    const deliveryAddress = params.deliveryAddress?.trim() || null;
+    if (fullName || profession || deliveryAddress) {
       await this.users.updateProfile(user.id, {
-        fullName,
-        deliveryAddress: 'Customer Address',
+        ...(fullName ? { fullName } : {}),
+        ...(profession ? { profession } : {}),
+        ...(deliveryAddress ? { deliveryAddress } : {}),
       });
     }
 
@@ -171,7 +201,7 @@ export class AuthService {
     countryCode: string;
     code: string;
   }) {
-    const fullPhone = `${params.countryCode}${params.phone}`;
+    const fullPhone = normalizeAuthPhone(params.countryCode, params.phone);
     await this.consumeOtp({ fullPhone, code: params.code });
 
     const user = await this.users.findByPhone(fullPhone);
@@ -179,10 +209,12 @@ export class AuthService {
       throw new UnauthorizedException('Account not found');
     }
     const loaded = await this.users.findById(user.id);
-    const isCustomer = (loaded?.roles ?? []).some(
-      (r) => String(r.name).toUpperCase() === 'CUSTOMER',
+    const roleNames = new Set(
+      (loaded?.roles ?? []).map((r) => String(r.name).toUpperCase()),
     );
-    if (!isCustomer) throw new UnauthorizedException('Account not found');
+    if (!roleNames.has('CUSTOMER') && !roleNames.has('DEALER')) {
+      throw new UnauthorizedException('Account not found');
+    }
 
     const snap = this.authSnapshot(loaded);
     return {
@@ -198,8 +230,9 @@ export class AuthService {
     code: string;
     fullName: string;
     email: string;
+    password: string;
   }) {
-    const fullPhone = `${params.countryCode}${params.phone}`;
+    const fullPhone = normalizeAuthPhone(params.countryCode, params.phone);
     const superCount = await this.users.countUsersWithRole('SUPERADMIN');
     if (superCount > 0) {
       throw new UnauthorizedException('Super Admin already exists');
@@ -207,16 +240,20 @@ export class AuthService {
 
     await this.consumeOtp({ fullPhone, code: params.code });
 
-    const email = params.email.trim();
-    const passwordHash = await bcrypt.hash(`${fullPhone}:${Date.now()}`, 8);
-    let user = await this.users.findByPhone(fullPhone);
-    if (!user) {
-      user = await this.users.createLocalUser({
-        email,
-        phone: fullPhone,
-        passwordHash,
-      });
+    const existing = await this.users.findByPhone(fullPhone);
+    if (existing) {
+      throw new ConflictException(
+        'This mobile number is already registered. Use a different number for the first Super Admin.',
+      );
     }
+
+    const email = params.email.trim();
+    const passwordHash = await bcrypt.hash(params.password, 12);
+    const user = await this.users.createLocalUser({
+      email,
+      phone: fullPhone,
+      passwordHash,
+    });
 
     const role = await this.rbac.getRoleByName('SUPERADMIN');
     if (!role) throw new UnauthorizedException('SUPERADMIN role not configured');
@@ -274,6 +311,12 @@ export class AuthService {
     return (
       roleNames.has('SUPERADMIN') || roleNames.has('OPERATIONAL_ADMIN')
     );
+  }
+
+  /** True when no SUPERADMIN exists yet (first-time web/bootstrap signup allowed). */
+  async isSuperadminBootstrapAvailable(): Promise<{ allowed: boolean }> {
+    const superCount = await this.users.countUsersWithRole('SUPERADMIN');
+    return { allowed: superCount === 0 };
   }
 
   private authSnapshot(user: User | null) {

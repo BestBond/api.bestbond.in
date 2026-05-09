@@ -44,6 +44,14 @@ export class UsersController {
       profession: dto.profession ?? undefined,
       deliveryAddress: dto.deliveryAddress ?? undefined,
     });
+    const roles = (updated.roles ?? []).map((r) => r.name);
+    const permissions = Array.from(
+      new Set(
+        (updated.roles ?? []).flatMap((r) =>
+          (r.permissions ?? []).map((p) => p.key),
+        ),
+      ),
+    );
     return {
       id: updated.id,
       email: updated.email,
@@ -54,8 +62,8 @@ export class UsersController {
       loyaltyPoints: updated.loyaltyPoints,
       memberSinceYear: updated.createdAt.getFullYear(),
       profileComplete: this.users.isProfileComplete(updated),
-      roles: auth.roles,
-      permissions: auth.permissions,
+      roles,
+      permissions,
     };
   }
 

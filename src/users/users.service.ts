@@ -1,13 +1,16 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
   UnauthorizedException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
+import { RbacService } from '../rbac/rbac.service';
 import { User } from './entities/user.entity';
 
 @Injectable()
@@ -15,6 +18,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
+    @Inject(forwardRef(() => RbacService))
+    private readonly rbac: RbacService,
   ) {}
 
   async findById(id: string): Promise<User | null> {
@@ -32,9 +37,22 @@ export class UsersService {
   }
 
   async findByPhone(phone: string): Promise<User | null> {
-    return this.usersRepo.findOne({
-      where: { phone },
-    });
+    const trimmed = phone.trim();
+    const digits = trimmed.replace(/\D/g, '');
+    const candidates = new Set<string>();
+    candidates.add(trimmed);
+    if (digits.length > 0) {
+      candidates.add(`+${digits}`);
+      candidates.add(digits);
+    }
+    const list = [...candidates];
+    if (list.length <= 1) {
+      return this.usersRepo.findOne({ where: { phone: list[0] ?? trimmed } });
+    }
+    return this.usersRepo
+      .createQueryBuilder('u')
+      .where('u.phone IN (:...list)', { list })
+      .getOne();
   }
 
   async countUsersWithRole(roleName: string): Promise<number> {
@@ -58,9 +76,7 @@ export class UsersService {
     if (existing) throw new ConflictException('Email already exists');
 
     if (params.phone) {
-      const existingPhone = await this.usersRepo.findOne({
-        where: { phone: params.phone },
-      });
+      const existingPhone = await this.findByPhone(params.phone);
       if (existingPhone) throw new ConflictException('Phone already exists');
     }
 
@@ -88,11 +104,13 @@ export class UsersService {
    * Used by GET /users/me/profile and can be mirrored on the client via `profileComplete`.
    */
   isProfileComplete(
-    user: Pick<User, 'fullName' | 'deliveryAddress'> | null | undefined,
+    user: Pick<User, 'fullName' | 'deliveryAddress' | 'profession'> | null | undefined,
   ): boolean {
     if (!user) return false;
     return (
-      Boolean(user.fullName?.trim()) && Boolean(user.deliveryAddress?.trim())
+      Boolean(user.fullName?.trim()) &&
+      Boolean(user.deliveryAddress?.trim()) &&
+      Boolean(user.profession?.trim())
     );
   }
 
@@ -102,6 +120,30 @@ export class UsersService {
     if (value === undefined || value === null) return null;
     const t = value.trim();
     return t.length > 0 ? t : null;
+  }
+
+  private isStaffUser(user: User): boolean {
+    return (user.roles ?? []).some((r) => {
+      const n = String(r.name).toUpperCase();
+      return n === 'SUPERADMIN' || n === 'OPERATIONAL_ADMIN';
+    });
+  }
+
+  /**
+   * End-user trade: CUSTOMER vs DEALER follows profile profession (mobile sends "Dealer" for dealers).
+   * Staff roles are left unchanged.
+   */
+  async syncTradeRoleFromProfession(userId: string): Promise<void> {
+    const user = await this.findById(userId);
+    if (!user || this.isStaffUser(user)) return;
+
+    const dealerRole = await this.rbac.getRoleByName('DEALER');
+    const customerRole = await this.rbac.getRoleByName('CUSTOMER');
+    if (!dealerRole || !customerRole) return;
+
+    const isDealer =
+      (user.profession ?? '').trim().toLowerCase() === 'dealer';
+    await this.setRoles(userId, [isDealer ? dealerRole : customerRole]);
   }
 
   async updateProfile(
@@ -114,6 +156,7 @@ export class UsersService {
   ): Promise<User> {
     const user = await this.findById(userId);
     if (!user) throw new NotFoundException('User not found');
+    const staff = this.isStaffUser(user);
 
     if (patch.fullName !== undefined) {
       user.fullName = this.normalizeProfileText(patch.fullName);
@@ -125,7 +168,11 @@ export class UsersService {
       user.deliveryAddress = this.normalizeProfileText(patch.deliveryAddress);
     }
 
-    return this.usersRepo.save(user);
+    const saved = await this.usersRepo.save(user);
+    if (patch.profession !== undefined && !staff) {
+      await this.syncTradeRoleFromProfession(saved.id);
+    }
+    return this.findById(saved.id).then((u) => u ?? saved);
   }
 
   async approveStaffUser(params: {

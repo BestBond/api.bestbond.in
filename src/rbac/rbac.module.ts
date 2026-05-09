@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
@@ -8,7 +8,10 @@ import { RbacController } from './rbac.controller';
 import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Role, Permission]), UsersModule],
+  imports: [
+    TypeOrmModule.forFeature([Role, Permission]),
+    forwardRef(() => UsersModule),
+  ],
   providers: [RbacService, RbacSeeder],
   controllers: [RbacController],
   exports: [RbacService, TypeOrmModule],

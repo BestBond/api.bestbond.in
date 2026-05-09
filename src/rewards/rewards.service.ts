@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -88,11 +87,38 @@ export class RewardsService {
         where: { id: params.rewardId, isActive: true },
       });
       if (!reward) throw new NotFoundException('Reward not found');
+
       if (this.isDealerUser(roleAwareUser)) {
-        throw new ForbiddenException(
-          'Dealers cannot redeem directly. Contact your shop/admin.',
-        );
+        if ((user.loyaltyPoints ?? 0) < reward.pointsCost) {
+          throw new BadRequestException('Insufficient points');
+        }
+        await this.points.credit({
+          userId: user.id,
+          points: -reward.pointsCost,
+          title: `Reward redemption pending: ${reward.title}`,
+          site: null,
+          type: 'REWARD_REDEEM',
+        });
+        const redemption = redemptionsRepo.create({
+          trackingId: this.generateTrackingId(),
+          user,
+          reward,
+          pointsCost: reward.pointsCost,
+          deliveryLabel: 'In-store pickup',
+          deliveryAddress: null,
+          channel: 'DEALER_STORE',
+          status: 'PROCESSING',
+          etaText:
+            'Pending ops approval. Visit your nearest authorized Best Bond store once approved.',
+        });
+        const saved = await redemptionsRepo.save(redemption);
+        return {
+          status: saved.status,
+          trackingId: saved.trackingId,
+          eta: saved.etaText,
+        };
       }
+
       if (
         this.isWorkerUser(roleAwareUser) &&
         !RewardsService.WORKER_SLAB_POINTS.has(reward.pointsCost)
@@ -111,6 +137,7 @@ export class RewardsService {
         type: 'REWARD_REDEEM',
       });
 
+      // Contractor/Painter (CUSTOMER role): in-app redemption is fulfilled without ops approval.
       const redemption = redemptionsRepo.create({
         trackingId: this.generateTrackingId(),
         user,
@@ -118,7 +145,8 @@ export class RewardsService {
         pointsCost: reward.pointsCost,
         deliveryLabel: params.deliveryLabel ?? null,
         deliveryAddress: params.deliveryAddress ?? null,
-        status: 'PROCESSING',
+        channel: 'CUSTOMER_APP',
+        status: 'SHIPPED',
         etaText: '5-7 Business Days',
       });
       const saved = await redemptionsRepo.save(redemption);

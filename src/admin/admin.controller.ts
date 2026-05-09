@@ -1,7 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AuthUser } from '../auth/auth-user';
+import { RequireAnyPermissions } from '../auth/require-any-permissions.decorator';
 import { RequirePermissions } from '../auth/require-permissions.decorator';
+import { CreateDealerRedemptionDto } from './dto/create-dealer-redemption.dto';
 import { CreateOperationalAdminDto } from './dto/create-operational-admin.dto';
 import { SuspendUserDto } from './dto/suspend-user.dto';
 import { AdminService } from './admin.service';
@@ -11,9 +13,9 @@ export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
   @Get('dashboard')
-  @RequirePermissions('users.manage')
-  getDashboard() {
-    return this.admin.getDashboardSummary();
+  @RequireAnyPermissions('users.manage', 'dealer.redemptions.manage', 'rbac.manage')
+  getDashboard(@Req() req: Request) {
+    return this.admin.getDashboardSummary(req.user as AuthUser);
   }
 
   /**
@@ -21,15 +23,18 @@ export class AdminController {
    * UI needs: request code, points value, reward name, requester, duplicate/flag markers.
    */
   @Get('redemptions')
-  @RequirePermissions('users.manage')
+  @RequirePermissions('dealer.redemptions.manage')
   listRedemptions(
+    @Req() req: Request,
     @Query('status') status?: string,
     @Query('take') take?: string,
     @Query('offset') offset?: string,
     @Query('sort') sort?: string,
     @Query('flagged') flagged?: string,
     @Query('flagMinPoints') flagMinPoints?: string,
+    @Query('channel') channel?: string,
   ) {
+    const auth = req.user as AuthUser;
     const t = take ? Number(take) : 20;
     const o = offset ? Number(offset) : 0;
     const takeN = Number.isFinite(t) ? Math.max(1, Math.min(100, t)) : 20;
@@ -40,13 +45,19 @@ export class AdminController {
       minPtsRaw != null && Number.isFinite(minPtsRaw) && minPtsRaw > 0
         ? minPtsRaw
         : undefined;
-    return this.admin.listRedemptionRequests({
+    const ch = (channel ?? 'ALL').toUpperCase();
+    const channelFilter =
+      ch === 'DEALER_STORE' || ch === 'CUSTOMER_APP'
+        ? ch
+        : ('ALL' as const);
+    return this.admin.listRedemptionRequests(auth, {
       status,
       take: takeN,
       offset: offsetN,
       sort,
       flaggedOnly: flaggedOn,
       flagMinPoints: minPts,
+      channel: channelFilter,
     });
   }
 
@@ -55,28 +66,62 @@ export class AdminController {
    * UI needs: status banner, reward title + points, requester profile info, and a user id for "View Account".
    */
   @Get('redemptions/:id')
-  @RequirePermissions('users.manage')
-  getRedemption(@Param('id') id: string, @Query('flagMinPoints') flagMinPoints?: string) {
+  @RequirePermissions('dealer.redemptions.manage')
+  getRedemption(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Query('flagMinPoints') flagMinPoints?: string,
+  ) {
+    const auth = req.user as AuthUser;
     const minPtsRaw = flagMinPoints ? Number(flagMinPoints) : undefined;
     const minPts =
       minPtsRaw != null && Number.isFinite(minPtsRaw) && minPtsRaw > 0
         ? minPtsRaw
         : undefined;
-    return this.admin.getRedemptionRequestById(id, { flagMinPoints: minPts });
+    return this.admin.getRedemptionRequestById(auth, id, { flagMinPoints: minPts });
+  }
+
+  /** Record a dealer in-store redemption (points debited; appears in approval queue). */
+  @Post('dealer-redemptions')
+  @RequirePermissions('dealer.redemptions.manage')
+  createDealerRedemption(@Body() dto: CreateDealerRedemptionDto) {
+    return this.admin.createDealerStoreRedemption({
+      dealerUserId: dto.dealerUserId,
+      rewardId: dto.rewardId,
+      deliveryLabel: dto.deliveryLabel ?? null,
+      deliveryAddress: dto.deliveryAddress ?? null,
+    });
+  }
+
+  /** Search dealer accounts (for recording store redemptions). */
+  @Get('dealers')
+  @RequirePermissions('dealer.redemptions.manage')
+  searchDealers(
+    @Query('q') q?: string,
+    @Query('take') take?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const t = take ? Number(take) : 20;
+    const o = offset ? Number(offset) : 0;
+    const takeN = Number.isFinite(t) ? Math.max(1, Math.min(100, t)) : 20;
+    const offsetN = Number.isFinite(o) ? Math.max(0, Math.min(10_000, o)) : 0;
+    return this.admin.searchDealers({ q, take: takeN, offset: offsetN });
   }
 
   /** Detail screen primary action: "Approve & Dispatch" */
   @Post('redemptions/:id/approve')
-  @RequirePermissions('users.manage')
-  approveRedemption(@Param('id') id: string) {
-    return this.admin.approveRedemptionRequest(id);
+  @RequirePermissions('dealer.redemptions.manage')
+  approveRedemption(@Req() req: Request, @Param('id') id: string) {
+    const auth = req.user as AuthUser;
+    return this.admin.approveRedemptionRequest(auth, id);
   }
 
   /** Detail screen secondary action: "Reject Request" */
   @Post('redemptions/:id/reject')
-  @RequirePermissions('users.manage')
-  rejectRedemption(@Param('id') id: string) {
-    return this.admin.rejectRedemptionRequest(id);
+  @RequirePermissions('dealer.redemptions.manage')
+  rejectRedemption(@Req() req: Request, @Param('id') id: string) {
+    const auth = req.user as AuthUser;
+    return this.admin.rejectRedemptionRequest(auth, id);
   }
 
   /**
@@ -86,8 +131,9 @@ export class AdminController {
    */
   @Post('redemptions/:id/deliver')
   @RequirePermissions('redemptions.deliver')
-  deliverRedemption(@Param('id') id: string) {
-    return this.admin.deliverRedemptionRequest(id);
+  deliverRedemption(@Req() req: Request, @Param('id') id: string) {
+    const auth = req.user as AuthUser;
+    return this.admin.deliverRedemptionRequest(auth, id);
   }
 
   /**
