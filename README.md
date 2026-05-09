@@ -91,6 +91,12 @@ Check out a few resources that may come in handy when working with NestJS:
 - To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
 - Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
 
+## Production CORS (admin web → API)
+
+If `curl https://api.example.com/...` works but the browser at `https://admin.example.com` shows failed `auth/otp/request` and **Provisional headers** in DevTools, the API is rejecting cross-origin requests. Set on the server:
+
+`CORS_ORIGINS=https://admin.bestbond.in,https://bestbond.in` (comma-separated, exact `Origin` values including `https` and no trailing slash). Restart the Nest process after changing `.env`.
+
 ## Super Admin authentication (BestBond)
 
 - **Login:** `POST /auth/otp/request` then `POST /auth/admin/otp/login` with `phone`, `countryCode`, `code`, and **`password`** (min 8 characters). Operational admins use the same endpoint but **omit** `password`.
