@@ -26,6 +26,8 @@ import { SupportModule } from './support/support.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // Load secrets from `.env` only — never from `.env.example` (that file is a template).
+      envFilePath: '.env',
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

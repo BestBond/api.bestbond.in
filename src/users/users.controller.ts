@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AuthUser } from '../auth/auth-user';
-import { RequirePermissions } from '../auth/require-permissions.decorator';
+import { RequireAnyPermissions } from '../auth/require-any-permissions.decorator';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateAdminPreferencesDto } from './dto/update-admin-preferences.dto';
@@ -67,15 +67,19 @@ export class UsersController {
     };
   }
 
+  /**
+   * Own notification + quick-PIN settings. Ops admins do not have `users.manage`
+   * but must complete onboarding like superadmins.
+   */
   @Get('me/admin-preferences')
-  @RequirePermissions('users.manage')
+  @RequireAnyPermissions('users.manage', 'dealer.redemptions.manage')
   getAdminPreferences(@Req() req: Request) {
     const auth = req.user as AuthUser;
     return this.users.getAdminPreferences(auth.id);
   }
 
   @Put('me/admin-preferences')
-  @RequirePermissions('users.manage')
+  @RequireAnyPermissions('users.manage', 'dealer.redemptions.manage')
   updateAdminPreferences(
     @Req() req: Request,
     @Body() dto: UpdateAdminPreferencesDto,
@@ -90,7 +94,7 @@ export class UsersController {
   }
 
   @Put('me/password')
-  @RequirePermissions('users.manage')
+  @RequireAnyPermissions('users.manage', 'dealer.redemptions.manage')
   changeMyPassword(@Req() req: Request, @Body() dto: ChangePasswordDto) {
     const auth = req.user as AuthUser;
     return this.users.changePassword({
