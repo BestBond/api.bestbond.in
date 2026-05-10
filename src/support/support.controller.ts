@@ -6,9 +6,9 @@ export class SupportController {
   getSupport() {
     return {
       /** E.164-style for tel: links */
-      phone: '+18005550199',
+      phone: '+919686191514',
       /** Digits only (no +) for https://wa.me/{whatsapp} */
-      whatsapp: '15551234567',
+      whatsapp: '919686191514',
       email: 'contactsupport@gmail.com',
       availability: '24/7',
     };

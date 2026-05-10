@@ -172,24 +172,33 @@ export class AdminService {
         'User') ?? 'User';
 
     // Banner text aligned with product status labels.
+    const isAppChannel = r.channel === 'CUSTOMER_APP';
     const statusLabel =
       r.status === 'PROCESSING'
-        ? 'Pending High-Ticket Review'
+        ? isAppChannel
+          ? 'Pending approval'
+          : 'Pending High-Ticket Review'
         : r.status === 'SHIPPED'
           ? 'Approved (In Dispatch)'
           : r.status === 'DELIVERED'
-            ? 'Delivered to Dealer'
+            ? isAppChannel
+              ? 'Delivered'
+              : 'Delivered to Dealer'
             : r.status === 'CANCELLED'
               ? 'Rejected / Cancelled'
               : r.status;
 
     const statusMessage =
       r.status === 'PROCESSING'
-        ? 'This request requires manual verification due to item value.'
+        ? isAppChannel
+          ? 'Contractor / painter app request. Review and approve before dispatch.'
+          : 'This request requires manual verification due to item value.'
         : r.status === 'SHIPPED'
           ? 'Approved and dispatched. Awaiting delivery confirmation.'
           : r.status === 'DELIVERED'
-            ? 'The reward has been delivered to the dealer.'
+            ? isAppChannel
+              ? 'The reward has been delivered to the recipient.'
+              : 'The reward has been delivered to the dealer.'
             : r.status === 'CANCELLED'
               ? 'This request has been rejected or cancelled.'
               : null;
@@ -230,6 +239,9 @@ export class AdminService {
       throw new BadRequestException('Only PROCESSING requests can be approved');
     }
     r.status = 'SHIPPED';
+    if (r.channel === 'CUSTOMER_APP') {
+      r.etaText = '5-7 Business Days';
+    }
     const saved = await this.redemptionRepo.save(r);
 
     const trackingDigits = (saved.trackingId ?? '').replace(/\D/g, '');
@@ -656,8 +668,11 @@ export class AdminService {
     const last7Start = addDays(now, -7);
     const last14Start = addDays(now, -14);
 
+    const pendingApprovalsWhere = isFullAdminUser(auth)
+      ? { status: 'PROCESSING' as const }
+      : { status: 'PROCESSING' as const, channel: 'DEALER_STORE' as const };
     const pendingApprovalsCount = await this.redemptionRepo.count({
-      where: { status: 'PROCESSING', channel: 'DEALER_STORE' },
+      where: pendingApprovalsWhere,
     });
 
     const pendingOpsAdminApprovalsCount = await this.usersRepo

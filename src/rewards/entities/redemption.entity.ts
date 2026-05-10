@@ -16,7 +16,7 @@ export type RedemptionStatus =
   | 'DELIVERED'
   | 'CANCELLED';
 
-/** CUSTOMER_APP: contractor/painter redeems in-app (no ops approval). DEALER_STORE: ops records redemption at store; requires ops approval queue. */
+/** CUSTOMER_APP: contractor/painter app redemption (pending superadmin approval). DEALER_STORE: in-store dealer redemption (ops/superadmin queue). */
 export type RedemptionChannel = 'CUSTOMER_APP' | 'DEALER_STORE';
 
 @Entity({ name: 'redemptions' })

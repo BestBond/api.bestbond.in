@@ -128,16 +128,19 @@ export class RewardsService {
         );
       }
 
-      // Debit points (creates transaction)
+      if ((user.loyaltyPoints ?? 0) < reward.pointsCost) {
+        throw new BadRequestException('Insufficient points');
+      }
+
+      // Contractor/Painter (CUSTOMER): points held pending superadmin approval (same pattern as dealer store).
       await this.points.credit({
         userId: user.id,
         points: -reward.pointsCost,
-        title: `Redeemed ${reward.title}`,
+        title: `Reward redemption pending: ${reward.title}`,
         site: null,
         type: 'REWARD_REDEEM',
       });
 
-      // Contractor/Painter (CUSTOMER role): in-app redemption is fulfilled without ops approval.
       const redemption = redemptionsRepo.create({
         trackingId: this.generateTrackingId(),
         user,
@@ -146,8 +149,9 @@ export class RewardsService {
         deliveryLabel: params.deliveryLabel ?? null,
         deliveryAddress: params.deliveryAddress ?? null,
         channel: 'CUSTOMER_APP',
-        status: 'SHIPPED',
-        etaText: '5-7 Business Days',
+        status: 'PROCESSING',
+        etaText:
+          'Pending admin approval. You will be notified when your request is approved.',
       });
       const saved = await redemptionsRepo.save(redemption);
 
@@ -185,19 +189,31 @@ export class RewardsService {
   }
 
   async cancelRedemption(params: { userId: string; redemptionId: string }) {
-    const r = await this.redemptionsRepo.findOne({
-      where: { id: params.redemptionId, user: { id: params.userId } },
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Redemption);
+      const r = await repo.findOne({
+        where: { id: params.redemptionId, user: { id: params.userId } },
+        relations: { user: true, reward: true },
+      });
+      if (!r) throw new NotFoundException('Redemption not found');
+      if (r.status === 'CANCELLED') {
+        throw new BadRequestException('Already cancelled');
+      }
+      if (r.status === 'DELIVERED') {
+        throw new BadRequestException('Cannot cancel a delivered order');
+      }
+      if (r.status === 'PROCESSING') {
+        await this.points.creditWithManager(manager, {
+          userId: r.user.id,
+          points: r.pointsCost,
+          title: `Refund: cancelled pending redemption (${r.reward?.title ?? 'reward'})`,
+          type: 'REDEMPTION_REFUND',
+        });
+      }
+      r.status = 'CANCELLED';
+      const saved = await repo.save(r);
+      return { id: saved.id, status: saved.status };
     });
-    if (!r) throw new NotFoundException('Redemption not found');
-    if (r.status === 'CANCELLED') {
-      throw new BadRequestException('Already cancelled');
-    }
-    if (r.status === 'DELIVERED') {
-      throw new BadRequestException('Cannot cancel a delivered order');
-    }
-    r.status = 'CANCELLED';
-    const saved = await this.redemptionsRepo.save(r);
-    return { id: saved.id, status: saved.status };
   }
 
   private generateTrackingId(): string {
