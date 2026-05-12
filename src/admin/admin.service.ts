@@ -421,11 +421,17 @@ export class AdminService {
     profession?: string;
     take: number;
     offset: number;
+    /** When set (super-admin list), omit this user from results so they never see themselves. */
+    excludeUserId?: string;
   }) {
     const q = (params.q ?? '').trim();
     const profession = (params.profession ?? '').trim();
 
     const qb = this.usersRepo.createQueryBuilder('u');
+
+    if (params.excludeUserId) {
+      qb.andWhere('u.id != :excludeUserId', { excludeUserId: params.excludeUserId });
+    }
 
     if (q.length) {
       const like = `%${q.toLowerCase()}%`;
@@ -515,11 +521,25 @@ export class AdminService {
     };
   }
 
-  async suspendUserById(userId: string, params?: { reason?: string | null }) {
-    const u = await this.usersRepo.findOne({ where: { id: userId } });
+  async suspendUserById(
+    actorUserId: string,
+    targetUserId: string,
+    params?: { reason?: string | null },
+  ) {
+    if (actorUserId === targetUserId) {
+      throw new ForbiddenException('You cannot suspend your own account.');
+    }
+    const u = await this.usersRepo.findOne({
+      where: { id: targetUserId },
+      relations: { roles: true },
+    });
     if (!u) throw new NotFoundException('User not found');
     if (!u.isActive) {
       throw new BadRequestException('User is already suspended');
+    }
+    const roleNames = new Set((u.roles ?? []).map((r) => String(r.name).toUpperCase()));
+    if (roleNames.has('SUPERADMIN') || roleNames.has('OPERATIONAL_ADMIN')) {
+      throw new ForbiddenException('Staff admin accounts cannot be suspended.');
     }
     // Design captures a reason; persistence is not specified yet, so we don't store it.
     // Keep the input validated (dto) and available for future audit logging.

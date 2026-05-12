@@ -176,6 +176,7 @@ export class RewardsService {
       pointsCost: r.pointsCost,
       deliveryLabel: r.deliveryLabel,
       deliveryAddress: r.deliveryAddress,
+      channel: r.channel,
       status: r.status,
       etaText: r.etaText,
       createdAt: r.createdAt,

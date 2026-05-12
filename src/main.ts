@@ -10,11 +10,22 @@ import { ValidationPipe } from '@nestjs/common';
 function parseCorsOrigins(): string[] {
   const raw =
     process.env.CORS_ORIGINS?.trim() ||
-    'http://localhost:5173,http://127.0.0.1:5173';
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174';
   return raw
     .split(/[, \n]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** Browsers send Origin per scheme+host+port — 5173 vs 5174 are different origins. */
+function isLocalDevBrowserOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
 }
 
 async function bootstrap() {
@@ -29,6 +40,8 @@ async function bootstrap() {
   });
 
   const allowedOrigins = parseCorsOrigins();
+  const isProduction = process.env.NODE_ENV === 'production';
+
   app.enableCors({
     origin: (origin, callback) => {
       // curl / server-side / mobile apps often omit Origin
@@ -37,6 +50,11 @@ async function bootstrap() {
         return;
       }
       if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      // Non-production: any Vite / local UI port on loopback (avoids CORS whack-a-mole).
+      if (!isProduction && isLocalDevBrowserOrigin(origin)) {
         callback(null, true);
         return;
       }
@@ -63,5 +81,10 @@ async function bootstrap() {
   console.log(
     `Reward API listening on ${port} — admin dashboard: GET /admin/dashboard (Bearer + users.manage OR dealer.redemptions.manage)`,
   );
+  if (!isProduction) {
+    console.log(
+      `CORS: non-production — allowing any http(s)://localhost or 127.0.0.1 origin (plus CORS_ORIGINS). Production requires an explicit allowlist.`,
+    );
+  }
 }
 void bootstrap();

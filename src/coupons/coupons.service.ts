@@ -434,7 +434,7 @@ export class CouponsService {
     );
     const mobileAppAssetsDir = path.resolve(
       repoRoot,
-      'RewardSystemMobile',
+      'BestBond',
       'src',
       'assets',
       'svgs',
@@ -653,7 +653,7 @@ export class CouponsService {
     );
     const mobileAppAssetsDir = path.resolve(
       repoRoot,
-      'RewardSystemMobile',
+      'BestBond',
       'src',
       'assets',
       'svgs',

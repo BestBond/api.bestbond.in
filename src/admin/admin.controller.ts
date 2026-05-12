@@ -143,16 +143,26 @@ export class AdminController {
   @Get('users')
   @RequirePermissions('users.manage')
   listUsers(
+    @Req() req: Request,
     @Query('q') q?: string,
     @Query('profession') profession?: string,
     @Query('take') take?: string,
     @Query('offset') offset?: string,
   ) {
+    const auth = req.user as AuthUser;
     const t = take ? Number(take) : 20;
     const o = offset ? Number(offset) : 0;
     const takeN = Number.isFinite(t) ? Math.max(1, Math.min(100, t)) : 20;
     const offsetN = Number.isFinite(o) ? Math.max(0, Math.min(10_000, o)) : 0;
-    return this.admin.listUsers({ q, profession, take: takeN, offset: offsetN });
+    const excludeSelf =
+      auth.permissions?.includes('rbac.manage') === true ? auth.id : undefined;
+    return this.admin.listUsers({
+      q,
+      profession,
+      take: takeN,
+      offset: offsetN,
+      excludeUserId: excludeSelf,
+    });
   }
 
   /** Super Admin — User profile screen */
@@ -165,8 +175,9 @@ export class AdminController {
   /** Super Admin — Suspend account (User Profile screen) */
   @Post('users/:id/suspend')
   @RequirePermissions('rbac.manage')
-  suspendUser(@Param('id') id: string, @Body() dto: SuspendUserDto) {
-    return this.admin.suspendUserById(id, { reason: dto.reason ?? null });
+  suspendUser(@Req() req: Request, @Param('id') id: string, @Body() dto: SuspendUserDto) {
+    const auth = req.user as AuthUser;
+    return this.admin.suspendUserById(auth.id, id, { reason: dto.reason ?? null });
   }
 
   /** Super Admin — Reactivate account (not in Figma yet, but needed to undo suspend) */
