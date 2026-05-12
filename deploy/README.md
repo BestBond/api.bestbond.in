@@ -115,14 +115,60 @@ Workflow: `.github/workflows/deploy-api.yml` — keep this file in your GitHub r
 
 | Secret        | Purpose                   |
 | ------------- | ------------------------- |
-| `VPS_HOST`    | Server hostname or IP     |
-| `VPS_SSH_KEY` | Private key for SSH (PEM) |
+| `VPS_HOST`    | Server hostname or IP (required — if empty, Actions shows `missing server host`) |
+| `VPS_SSH_KEY` | Private key for SSH (PEM), full key including `BEGIN` / `END` lines |
+| `VPS_SSH_KEY_PASSPHRASE` | Optional — only if that private key was created **with** a passphrase |
 
 The workflow connects as `root`. To use another user, change `username` in `.github/workflows/deploy-api.yml`.
 
-**GitHub Actions SSH key** — Add a dedicated key pair: public key in `/root/.ssh/authorized_keys` on the VPS, private key in the repo secret `VPS_SSH_KEY` (same secret can be reused on the frontend repo for rsync).
+### Where does `VPS_SSH_KEY` come from?
+
+It is **not** shown in Hostinger hPanel. It is the **private** SSH key file whose matching **public** key is listed in **`/root/.ssh/authorized_keys`** on the VPS (so `ssh root@YOUR_SERVER` works).
+
+**Option A — New key only for GitHub Actions (recommended)**
+
+On your **Mac or Linux** (not necessarily on the server):
+
+```bash
+ssh-keygen -t ed25519 -f ./github-actions-vps -N ""
+```
+
+That creates:
+
+- **`github-actions-vps`** — this entire file’s contents go into the GitHub secret **`VPS_SSH_KEY`** (from `-----BEGIN` through `-----END`).
+- **`github-actions-vps.pub`** — append this **one line** to the server:  
+  `cat github-actions-vps.pub >> ~/.ssh/authorized_keys` (as `root` on the VPS), then `chmod 600 ~/.ssh/authorized_keys` if needed.
+
+**Option B — Key you already use to SSH**
+
+If you connect with `ssh -i ~/.ssh/some_key root@...`, the secret is the **contents of that private key file** `some_key` (never the `.pub` file). Paste the whole PEM into **`VPS_SSH_KEY`**.
+
+**Option C — Generate on the VPS**
+
+On the server as root: `ssh-keygen -t ed25519 -f /root/.ssh/github_actions -N ""`, then put **`/root/.ssh/github_actions`** (private) into GitHub and add **`github_actions.pub`** to **`authorized_keys`**. Prefer generating on your laptop so the private key never sits in shell history.
 
 **Git pulls on the server** — The workflow runs `git fetch` / `git reset` on the VPS. That host must already authenticate to GitHub (deploy key for this repo, or SSH agent). The key in `VPS_SSH_KEY` is only for GitHub Actions → VPS login, not for `git fetch` unless you reuse it.
+
+### Actions: `ssh: unable to authenticate` / `attempted methods [none publickey]`
+
+GitHub has a private key, but **sshd on the VPS is not accepting it**. Check in order:
+
+1. **Matching pair** — The line in **`/root/.ssh/authorized_keys`** must be from the **same** key pair as **`VPS_SSH_KEY`** (the **`.pub`** of that private key). If you regenerated the key, update **`authorized_keys`** again.
+
+2. **Paste the whole private key** — Secret must include the full PEM: from **`-----BEGIN ...`** through **`-----END ...`** and the final newline. No extra quotes around the value in GitHub. Do **not** paste the `.pub` file here.
+
+3. **No passphrase (simplest)** — If the private key was created **with a passphrase**, `appleboy/ssh-action` needs it. Either run `ssh-keygen ... -N ""` for a deploy key with **empty** passphrase, or add an optional repo secret **`VPS_SSH_KEY_PASSPHRASE`** (see workflow `passphrase` input).
+
+4. **Prove login locally** (from your Mac), using the **exact** key file you pasted into GitHub:
+   ```bash
+   ssh -i /path/to/private_key -o IdentitiesOnly=yes root@YOUR_VPS_IP
+   ```
+   If this fails, fix the server key setup before Actions will work.
+
+5. **Permissions on the VPS** (as root):  
+   `chmod 700 /root/.ssh` and `chmod 600 /root/.ssh/authorized_keys`.
+
+6. **`VPS_HOST`** must be the same host you SSH to (IP or hostname). No `ssh://` prefix, no username in the host field.
 
 The workflow SSHs in, `git fetch` / `git reset --hard origin/main`, `npm ci --omit=dev`, `npm run build`, then `pm2 startOrReload ecosystem.config.cjs`.
 
