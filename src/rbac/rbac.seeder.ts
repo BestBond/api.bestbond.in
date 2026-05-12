@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { DataSource } from 'typeorm';
 import { RbacService } from './rbac.service';
 import { UsersService } from '../users/users.service';
 
@@ -16,9 +17,29 @@ export class RbacSeeder implements OnModuleInit {
     private readonly rbac: RbacService,
     private readonly users: UsersService,
     private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
+  /**
+   * Production often sets DATABASE_SYNCHRONIZE=false, so a new SQLite file has no tables.
+   * Seeders run after TypeORM init; create schema once before touching RBAC rows.
+   */
+  private async ensureSqliteSchema(): Promise<void> {
+    if (this.dataSource.options.type !== 'sqlite') return;
+    const rows = (await this.dataSource.query(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'permissions'`,
+    )) as { name: string }[];
+    if (rows.length > 0) return;
+
+    this.logger.warn(
+      'SQLite has no RBAC tables yet (typical first boot with synchronize off). Running one-time schema sync from entities.',
+    );
+    await this.dataSource.synchronize();
+  }
+
   async onModuleInit() {
+    await this.ensureSqliteSchema();
+
     const permissions = [
       { key: 'rbac.manage', description: 'Manage roles and permissions' },
       {

@@ -122,6 +122,8 @@ If your private key has a **passphrase**, add `passphrase: ${{ secrets.VPS_SSH_K
 
 The workflow connects as **`root`**. To use another user, change `username` in `.github/workflows/deploy-api.yml`.
 
+**SQLite first production boot** — If `DATABASE_SYNCHRONIZE` is not `true`, a new empty DB has no tables. The app runs a **one-time** `synchronize()` from entities when the `permissions` table is missing (see `RbacSeeder`), then RBAC seed runs. After that you can keep `DATABASE_SYNCHRONIZE=false` for safety.
+
 ### Where does `VPS_SSH_KEY` come from?
 
 It is **not** shown in Hostinger hPanel. It is the **private** SSH key file whose matching **public** key is listed in **`/root/.ssh/authorized_keys`** on the VPS (so `ssh root@YOUR_SERVER` works).
