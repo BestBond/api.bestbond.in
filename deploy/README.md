@@ -2,6 +2,8 @@
 
 **On-server layout:** production app directories match the public hostname under `/var/www/` (e.g. **`/var/www/api.bestbond.in`** for this API, **`/var/www/admin.bestbond.in`** for the admin SPA).
 
+**Quick deploy (on server):** from clone root run **`./deploy.sh`**. Use `RUN_GIT_PULL=1 ./deploy.sh` to `git fetch` + reset before build.
+
 ## One-time VPS setup
 
 1. **DNS** — Point `api.bestbond.in` A record to the server IP.
