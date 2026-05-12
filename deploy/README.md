@@ -117,9 +117,10 @@ Workflow: `.github/workflows/deploy-api.yml` — keep this file in your GitHub r
 | ------------- | ------------------------- |
 | `VPS_HOST`    | Server hostname or IP (required — if empty, Actions shows `missing server host`) |
 | `VPS_SSH_KEY` | Private key for SSH (PEM), full key including `BEGIN` / `END` lines |
-| `VPS_SSH_KEY_PASSPHRASE` | Optional — only if that private key was created **with** a passphrase |
 
-The workflow connects as `root`. To use another user, change `username` in `.github/workflows/deploy-api.yml`.
+If your private key has a **passphrase**, add `passphrase: ${{ secrets.VPS_SSH_KEY_PASSPHRASE }}` under `with:` in `.github/workflows/deploy-api.yml` and create secret **`VPS_SSH_KEY_PASSPHRASE`**. Omit that line when the key has **no** passphrase (recommended for deploy keys: `ssh-keygen ... -N ""`).
+
+The workflow connects as **`root`**. To use another user, change `username` in `.github/workflows/deploy-api.yml`.
 
 ### Where does `VPS_SSH_KEY` come from?
 
@@ -157,18 +158,25 @@ GitHub has a private key, but **sshd on the VPS is not accepting it**. Check in 
 
 2. **Paste the whole private key** — Secret must include the full PEM: from **`-----BEGIN ...`** through **`-----END ...`** and the final newline. No extra quotes around the value in GitHub. Do **not** paste the `.pub` file here.
 
-3. **No passphrase (simplest)** — If the private key was created **with a passphrase**, `appleboy/ssh-action` needs it. Either run `ssh-keygen ... -N ""` for a deploy key with **empty** passphrase, or add an optional repo secret **`VPS_SSH_KEY_PASSPHRASE`** (see workflow `passphrase` input).
+3. **Passphrase** — Prefer a deploy key **without** a passphrase (`ssh-keygen ... -N ""`). If the key **has** a passphrase, add secret **`VPS_SSH_KEY_PASSPHRASE`** and add `passphrase: ${{ secrets.VPS_SSH_KEY_PASSPHRASE }}` under `with:` in `deploy-api.yml`. Do **not** pass `passphrase` for unencrypted keys.
 
-4. **Prove login locally** (from your Mac), using the **exact** key file you pasted into GitHub:
+4. **Paste without corrupting newlines** — Prefer GitHub CLI so the file is stored exactly:
+   ```bash
+   gh secret set VPS_SSH_KEY < ./github-actions-vps
+   gh secret set VPS_HOST -b"187.xxx.xxx.xxx"
+   ```
+   If you use the web UI, avoid CRLF (Windows); run `dos2unix` on the key file or `tr -d '\r' < key > key.unix` before copying.
+
+5. **Prove login locally** (from your Mac), using the **exact** private key file you stored in **`VPS_SSH_KEY`**:
    ```bash
    ssh -i /path/to/private_key -o IdentitiesOnly=yes root@YOUR_VPS_IP
    ```
-   If this fails, fix the server key setup before Actions will work.
+   If this fails, Actions will fail too.
 
-5. **Permissions on the VPS** (as root):  
+6. **Permissions on the VPS** (as root):  
    `chmod 700 /root/.ssh` and `chmod 600 /root/.ssh/authorized_keys`.
 
-6. **`VPS_HOST`** must be the same host you SSH to (IP or hostname). No `ssh://` prefix, no username in the host field.
+7. **`VPS_HOST`** — Use **public IPv4** or a **public DNS name** (e.g. `srv1653866.hstgr.cloud`). No `root@` prefix. A bare short hostname often does not resolve from GitHub’s runners.
 
 The workflow SSHs in, `git fetch` / `git reset --hard origin/main`, `npm ci --omit=dev`, `npm run build`, then `pm2 startOrReload ecosystem.config.cjs`.
 
