@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import type { StringValue } from 'ms';
 import { UsersModule } from '../users/users.module';
 import { RbacModule } from '../rbac/rbac.module';
 import { AuthService } from './auth.service';
@@ -13,6 +12,7 @@ import { PermissionsGuard } from './permissions.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OtpCode } from './entities/otp-code.entity';
+import { createJwtRegisterAsync } from './jwt-module.factory';
 
 @Module({
   imports: [
@@ -21,22 +21,7 @@ import { OtpCode } from './entities/otp-code.entity';
     UsersModule,
     RbacModule,
     PassportModule,
-    JwtModule.registerAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const rawExpiresIn = String(config.get('JWT_EXPIRES_IN') ?? '1h');
-        const expiresIn: number | StringValue = /^\d+$/.test(rawExpiresIn)
-          ? Number(rawExpiresIn)
-          : (rawExpiresIn as StringValue);
-
-        const secret = String(config.get('JWT_SECRET') ?? 'dev-secret');
-
-        return {
-          secret,
-          signOptions: { expiresIn },
-        };
-      },
-    }),
+    JwtModule.registerAsync(createJwtRegisterAsync()),
   ],
   controllers: [AuthController],
   providers: [

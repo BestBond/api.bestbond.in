@@ -30,6 +30,14 @@
 
    Production essentials: `NODE_ENV=production`, **`PORT`** (see nginx upstream — use **`3001`** if `bestbond.in` already uses **`3000`**), `DB_PATH` (absolute path on persistent disk), strong `JWT_SECRET`, `CORS_ORIGINS=https://admin.bestbond.in`, `TRUST_PROXY=1` behind nginx.
 
+   **OTP testing (admin + mobile autofill, no SMS):** until MSG91 is configured, set on the VPS:
+
+   ```env
+   MSG91_OTP_ENABLED=0
+   ```
+
+   Redeploy/restart the API. `POST /auth/otp/request` then includes **`devCode`** in the JSON (admin + mobile read it and autofill). Optional: `OTP_DEBUG_EXPOSE_CODE=1` if you ever re-enable MSG91 but still need stub OTP on `/auth/otp/request`.
+
 5. **Install, build, PM2**:
 
    ```bash

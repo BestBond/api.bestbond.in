@@ -41,9 +41,14 @@ export class AuthService {
     });
     const saved = await this.otpRepo.save(rec);
 
+    const msg91Off = (() => {
+      const on = String(process.env.MSG91_OTP_ENABLED ?? '1').trim();
+      return on === '0' || on.toLowerCase() === 'false';
+    })();
     const exposeDebugOtp =
       process.env.NODE_ENV !== 'production' ||
-      process.env.OTP_DEBUG_EXPOSE_CODE === '1';
+      process.env.OTP_DEBUG_EXPOSE_CODE === '1' ||
+      msg91Off;
 
     return {
       requestId: saved.id,

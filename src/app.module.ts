@@ -23,6 +23,7 @@ import { CouponsModule } from './coupons/coupons.module';
 import { RewardsModule } from './rewards/rewards.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { SupportModule } from './support/support.module';
+import { OtpModule } from './otp/otp.module';
 
 @Module({
   imports: [
@@ -31,9 +32,7 @@ import { SupportModule } from './support/support.module';
       // Load secrets from `.env` only — never from `.env.example` (that file is a template).
       envFilePath: '.env',
     }),
-    ThrottlerModule.forRoot([
-      { name: 'default', ttl: 60_000, limit: 300 },
-    ]),
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -75,11 +74,9 @@ import { SupportModule } from './support/support.module';
     RewardsModule,
     TransactionsModule,
     SupportModule,
+    OtpModule,
   ],
   controllers: [AppController, AppControllerV1],
-  providers: [
-    AppService,
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
-  ],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
