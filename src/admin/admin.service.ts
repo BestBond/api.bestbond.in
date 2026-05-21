@@ -446,8 +446,14 @@ export class AdminService {
 
     if (profession.length && profession.toLowerCase() !== 'all') {
       const p = profession.toLowerCase().replace(/\s+/g, '');
-      const workerProfessions = ['contractor', 'painter', 'contractor/painter'];
-      if (p === 'contractor/painter') {
+      const workerProfessions = [
+        'contractor',
+        'painter',
+        'worker',
+        'contractor/painter',
+        'contractor/worker',
+      ];
+      if (p === 'contractor/painter' || p === 'contractor/worker') {
         qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) IN (:...w)', {
           w: workerProfessions,
         });
