@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -28,7 +29,9 @@ import {
 function resolveBackendSvgAssetsDir(): string {
   const candidates = [
     path.join(process.cwd(), 'src', 'frontend_assets', 'svgs'),
+    path.join(process.cwd(), 'dist', 'frontend_assets', 'svgs'),
     path.resolve(__dirname, '../../src/frontend_assets/svgs'),
+    path.resolve(__dirname, '../../frontend_assets/svgs'),
     path.resolve(__dirname, '../frontend_assets/svgs'),
   ];
   for (const p of candidates) {
@@ -210,6 +213,15 @@ async function mergeCouponPdfBuffers(parts: Uint8Array[]): Promise<Uint8Array> {
   return new Uint8Array(await merged.save());
 }
 
+/** Common Chromium paths on Linux VPS images (apt install chromium / chromium-browser). */
+const LINUX_CHROMIUM_CANDIDATES = [
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/snap/bin/chromium',
+];
+
 function resolvePuppeteerExecutablePath(): string | undefined {
   const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
   if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
@@ -219,36 +231,90 @@ function resolvePuppeteerExecutablePath(): string | undefined {
   } catch {
     /* puppeteer may throw if browser not installed */
   }
+  if (process.platform === 'linux') {
+    for (const candidate of LINUX_CHROMIUM_CANDIDATES) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
   return undefined;
+}
+
+function puppeteerUnavailableMessage(cause?: string): string {
+  const hint =
+    'On the VPS, ensure @sparticuz/chromium is installed (npm ci) or set PUPPETEER_EXECUTABLE_PATH to a working Chromium binary.';
+  return cause
+    ? `Coupon PDF export is unavailable (${cause}). ${hint}`
+    : `Coupon PDF export is unavailable. ${hint}`;
+}
+
+function shouldUseSparticuzChromium(): boolean {
+  if (process.env.PUPPETEER_USE_SPARTICUZ === '0') return false;
+  if (process.env.PUPPETEER_USE_SPARTICUZ === '1') return true;
+  if (process.env.PUPPETEER_EXECUTABLE_PATH?.trim()) return false;
+  return process.platform === 'linux' && process.env.NODE_ENV === 'production';
+}
+
+async function launchPuppeteerForPdf(
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<typeof puppeteer.launch>>> {
+  const baseArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-crash-reporter',
+  ];
+
+  if (shouldUseSparticuzChromium()) {
+    const chromium = (await import('@sparticuz/chromium')).default;
+    const executablePath = await chromium.executablePath();
+    return puppeteer.launch({
+      headless: chromium.headless,
+      executablePath,
+      args: [...chromium.args, ...baseArgs],
+      protocolTimeout: timeoutMs,
+    });
+  }
+
+  const executablePath = resolvePuppeteerExecutablePath();
+  if (!executablePath) {
+    throw new ServiceUnavailableException(
+      puppeteerUnavailableMessage('no Chromium/Chrome binary found'),
+    );
+  }
+
+  return puppeteer.launch({
+    headless: true,
+    protocolTimeout: timeoutMs,
+    args: baseArgs,
+    executablePath,
+  });
+}
+
+function isPuppeteerLaunchError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? `${err.name}: ${err.message}`
+      : String(err ?? '');
+  return /Could not find Chrome|Failed to launch|ENOENT|browser|chromium|executable/i.test(
+    msg,
+  );
 }
 
 async function htmlToCouponPdfBuffer(html: string): Promise<Uint8Array> {
   const timeoutMs = puppeteerPdfTimeoutMs();
-  const launchOpts = {
-    headless: true,
-    protocolTimeout: timeoutMs,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-crash-reporter',
-    ],
-  };
 
-  const executablePath = resolvePuppeteerExecutablePath();
   let browser: Awaited<ReturnType<typeof puppeteer.launch>>;
   try {
-    browser = await puppeteer.launch(
-      executablePath
-        ? { ...launchOpts, executablePath }
-        : { ...launchOpts },
-    );
+    browser = await launchPuppeteerForPdf(timeoutMs);
   } catch (firstErr) {
-    if (executablePath) {
-      browser = await puppeteer.launch({ ...launchOpts });
-    } else {
-      throw firstErr;
+    if (isPuppeteerLaunchError(firstErr)) {
+      throw new ServiceUnavailableException(
+        puppeteerUnavailableMessage(
+          firstErr instanceof Error ? firstErr.message : String(firstErr),
+        ),
+      );
     }
+    throw firstErr;
   }
   try {
     const page = await browser.newPage();
