@@ -11,7 +11,8 @@ import { User } from '../users/entities/user.entity';
 import { PointsService } from '../points/points.service';
 import { randomBytes } from 'crypto';
 
-export const CONTRACTOR_TIER_THRESHOLD = 2_000_000;
+/** Lifetime points required to unlock Contractor tier (Worker → Contractor). */
+export const CONTRACTOR_TIER_THRESHOLD = 120_000;
 
 @Injectable()
 export class RewardsService {
@@ -158,8 +159,8 @@ export class RewardsService {
         if (reward.giftTier !== userTier) {
           throw new BadRequestException(
             userTier === 'WORKER'
-              ? 'This gift is available only at Contractor tier (2,000,000+ points balance).'
-              : 'This gift is available only at Worker tier (balance below 2,000,000 points).',
+              ? `This gift is available only at Contractor tier (${CONTRACTOR_TIER_THRESHOLD.toLocaleString()}+ points balance).`
+              : `This gift is available only at Worker tier (balance below ${CONTRACTOR_TIER_THRESHOLD.toLocaleString()} points).`,
           );
         }
       }
