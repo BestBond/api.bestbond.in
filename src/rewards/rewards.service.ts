@@ -30,6 +30,11 @@ export class RewardsService {
     return pts >= CONTRACTOR_TIER_THRESHOLD ? 'CONTRACTOR' : 'WORKER';
   }
 
+  /** Contractors may redeem Worker-tier gifts; Worker users cannot redeem Contractor-tier gifts. */
+  static canRedeemGiftTier(userTier: GiftTier, rewardTier: GiftTier): boolean {
+    return userTier === 'CONTRACTOR' || rewardTier === 'WORKER';
+  }
+
   async getMyGiftTier(userId: string) {
     const user = await this.usersRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
@@ -156,11 +161,9 @@ export class RewardsService {
 
       if (!this.isDealerUser(roleAwareUser)) {
         const userTier = RewardsService.resolveGiftTier(balance);
-        if (reward.giftTier !== userTier) {
+        if (!RewardsService.canRedeemGiftTier(userTier, reward.giftTier)) {
           throw new BadRequestException(
-            userTier === 'WORKER'
-              ? `This gift is available only at Contractor tier (${CONTRACTOR_TIER_THRESHOLD.toLocaleString()}+ points balance).`
-              : `This gift is available only at Worker tier (balance below ${CONTRACTOR_TIER_THRESHOLD.toLocaleString()} points).`,
+            `This gift is available only at Contractor tier (${CONTRACTOR_TIER_THRESHOLD.toLocaleString()}+ points balance).`,
           );
         }
       }
@@ -290,7 +293,8 @@ export class RewardsService {
     userGiftTier: GiftTier | null,
   ) {
     const tierRedeemable =
-      userGiftTier != null && reward.giftTier === userGiftTier;
+      userGiftTier != null &&
+      RewardsService.canRedeemGiftTier(userGiftTier, reward.giftTier);
     const canAfford = balance >= reward.pointsCost;
 
     return {
