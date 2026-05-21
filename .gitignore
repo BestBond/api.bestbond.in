@@ -30,7 +30,7 @@ logs/
 
 # Design reference assets (not used at runtime)
 figmadesign/
-Gifts/
+/Gifts/
 
 # Runtime data / local databases
 data.sqlite
