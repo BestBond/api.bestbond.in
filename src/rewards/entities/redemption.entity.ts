@@ -51,7 +51,7 @@ export class Redemption {
   channel!: RedemptionChannel;
 
   @Column({ name: 'eta_text', type: 'text', nullable: true })
-  etaText!: string | null; // e.g. "5-7 Business Days"
+  etaText!: string | null; // e.g. "10-15 days" after approval
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

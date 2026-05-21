@@ -15,6 +15,7 @@ import { PointsService } from '../points/points.service';
 import { PointsTransaction } from '../points/entities/points-transaction.entity';
 import { Redemption } from '../rewards/entities/redemption.entity';
 import { Reward } from '../rewards/entities/reward.entity';
+import { SHIPPING_ETA_TEXT } from '../rewards/rewards.service';
 import { User } from '../users/entities/user.entity';
 import { Coupon } from '../coupons/entities/coupon.entity';
 
@@ -240,7 +241,7 @@ export class AdminService {
     }
     r.status = 'SHIPPED';
     if (r.channel === 'CUSTOMER_APP') {
-      r.etaText = '5-7 Business Days';
+      r.etaText = SHIPPING_ETA_TEXT;
     }
     const saved = await this.redemptionRepo.save(r);
 

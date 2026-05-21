@@ -14,6 +14,9 @@ import { randomBytes } from 'crypto';
 /** Lifetime points required to unlock Contractor tier (Worker → Contractor). */
 export const CONTRACTOR_TIER_THRESHOLD = 120_000;
 
+/** Default ETA shown after ops approves a customer-app redemption (shipped). */
+export const SHIPPING_ETA_TEXT = '10-15 days';
+
 @Injectable()
 export class RewardsService {
   constructor(
