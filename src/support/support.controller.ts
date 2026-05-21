@@ -9,7 +9,7 @@ export class SupportController {
       phone: '+919686191514',
       /** Digits only (no +) for https://wa.me/{whatsapp} */
       whatsapp: '919686191514',
-      email: 'contactsupport@gmail.com',
+      email: 'bestbond03@yahoo.com',
       availability: '24/7',
     };
   }
