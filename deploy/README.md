@@ -36,6 +36,8 @@ Default port: **`3001`** (when `bestbond.in` uses **3000**)
 
 Batch PDF (`GET /coupons/batches/:id/export.pdf`) uses **Puppeteer**. On Linux production the API uses **`@sparticuz/chromium`** automatically (no `apt` / sudo required). Keep `PUPPETEER_SKIP_DOWNLOAD=1` for `npm ci`.
 
+Local development does not use the VPS Chromium path. It first uses Puppeteer's local browser download, then common installed Chrome/Chromium paths for the current OS. Keep local browser settings in `.env.local`; keep VPS settings in `.env.production`.
+
 Optional overrides in `.env.production`:
 
 ```env
@@ -79,6 +81,21 @@ pm2 reload bestbond-reward-api --update-env
 
 Upstream must match `PORT` in `.env.production` (typically **3001**). See `deploy/nginx-api.bestbond.in.conf.sample`.
 
+## Mobile account deletion (App Store 5.1.1)
+
+Customer/dealer apps call:
+
+```http
+DELETE /users/me
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "passcode": "123456" }
+```
+
+- Verifies the 6-digit passcode, then deactivates the account and clears personal fields (phone, name, address, PIN).
+- Staff roles (`SUPERADMIN`, `OPERATIONAL_ADMIN`) receive `403` — not deletable from the mobile app.
+
 ## Troubleshooting
 
 ### `nest: not found`
@@ -95,7 +112,7 @@ With nginx TLS, set `TRUST_PROXY=1` and include `https://admin.bestbond.in` in `
 
 ### Coupon PDF returns 500 / “Internal server error”
 
-1. Confirm Chromium: `ls -l /usr/bin/chromium /usr/bin/chromium-browser 2>/dev/null`
-2. Run `sudo bash scripts/ensure-chromium-for-pdf.sh`
-3. Set `PUPPETEER_EXECUTABLE_PATH` in `.env.production` and `pm2 reload bestbond-reward-api --update-env`
+1. Confirm production is running with `NODE_ENV=production`.
+2. Confirm `@sparticuz/chromium` is installed: `npm ls @sparticuz/chromium`.
+3. If Sparticuz is disabled, run `sudo bash scripts/ensure-chromium-for-pdf.sh`, set `PUPPETEER_EXECUTABLE_PATH` in `.env.production`, and `pm2 reload bestbond-reward-api --update-env`.
 4. Check logs: `pm2 logs bestbond-reward-api --lines 50`

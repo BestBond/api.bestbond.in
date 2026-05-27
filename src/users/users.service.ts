@@ -1,6 +1,8 @@
+import { randomBytes } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -216,6 +218,31 @@ export class UsersService {
     return { ok: true };
   }
 
+  async changePasscode(params: {
+    userId: string;
+    currentPasscode: string;
+    newPasscode: string;
+    confirmNewPasscode: string;
+  }) {
+    if (params.newPasscode !== params.confirmNewPasscode) {
+      throw new BadRequestException('Passcode and confirmation do not match');
+    }
+    if (params.currentPasscode === params.newPasscode) {
+      throw new BadRequestException(
+        'New passcode must be different from current passcode',
+      );
+    }
+    const user = await this.findById(params.userId);
+    if (!user) throw new NotFoundException('User not found');
+    if (!user.pinHash) {
+      throw new BadRequestException('Passcode not configured for this account');
+    }
+    const ok = await bcrypt.compare(params.currentPasscode, user.pinHash);
+    if (!ok) throw new UnauthorizedException('Current passcode is incorrect');
+    await this.setPinHash(user.id, await bcrypt.hash(params.newPasscode, 12));
+    return { ok: true };
+  }
+
   async getAdminPreferences(userId: string) {
     const user = await this.findById(userId);
     if (!user) throw new NotFoundException('User not found');
@@ -256,5 +283,39 @@ export class UsersService {
 
     await this.usersRepo.save(user);
     return this.getAdminPreferences(userId);
+  }
+
+  /**
+   * Permanent customer/dealer account deletion (Apple 5.1.1(v)).
+   * Deactivates login and removes personal data; keeps the user row for redemption audit FKs.
+   */
+  async deleteMyAccount(userId: string, passcode: string): Promise<{ ok: true }> {
+    const user = await this.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+    if (!user.isActive) {
+      throw new BadRequestException('This account has already been deleted');
+    }
+    if (this.isStaffUser(user)) {
+      throw new ForbiddenException(
+        'Management accounts cannot be deleted from the app. Contact your administrator.',
+      );
+    }
+    if (!user.pinHash) {
+      throw new BadRequestException('Passcode not configured for this account');
+    }
+    const ok = await bcrypt.compare(passcode, user.pinHash);
+    if (!ok) throw new UnauthorizedException('Passcode is incorrect');
+
+    user.email = `deleted.${user.id}@account.removed`;
+    user.phone = null;
+    user.fullName = null;
+    user.profession = null;
+    user.deliveryAddress = null;
+    user.pinHash = null;
+    user.passwordHash = await bcrypt.hash(randomBytes(32).toString('hex'), 12);
+    user.loyaltyPoints = 0;
+    user.isActive = false;
+    await this.usersRepo.save(user);
+    return { ok: true };
   }
 }

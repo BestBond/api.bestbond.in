@@ -101,6 +101,9 @@ function couponExportPdfChunkSize(): number {
 
 /** Front-only coupon faces per A4 page (print export). */
 const COUPON_BATCH_PDF_FRONTS_PER_PAGE = 3;
+const COUPON_PRINT_WIDTH_IN = 4;
+const COUPON_PRINT_HEIGHT_IN = 2;
+const COUPON_PREVIEW_SCALE = 120;
 
 function toCouponSvgDataUri(svg: string): string {
   const cleaned = svg
@@ -192,7 +195,14 @@ function buildCouponBatchPdfHtml(innerPagesHtml: string): string {
         gap: 8mm;
         align-items: center;
       }
-      .face { display: block; border-radius: 10mm; overflow: hidden; flex-shrink: 0; }
+      .face {
+        display: block;
+        width: ${COUPON_PRINT_WIDTH_IN}in;
+        height: ${COUPON_PRINT_HEIGHT_IN}in;
+        border-radius: 8mm;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
     </style>
   </head>
   <body>
@@ -222,6 +232,45 @@ const LINUX_CHROMIUM_CANDIDATES = [
   '/snap/bin/chromium',
 ];
 
+/** Common browser paths for local development on macOS. */
+const DARWIN_CHROMIUM_CANDIDATES = [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+];
+
+function browserExecutableCandidates(): string[] {
+  if (process.platform === 'linux') return LINUX_CHROMIUM_CANDIDATES;
+  if (process.platform === 'darwin') return DARWIN_CHROMIUM_CANDIDATES;
+  if (process.platform === 'win32') {
+    return [
+      process.env.LOCALAPPDATA
+        ? path.join(
+            process.env.LOCALAPPDATA,
+            'Google',
+            'Chrome',
+            'Application',
+            'chrome.exe',
+          )
+        : '',
+      process.env.PROGRAMFILES
+        ? path.join(process.env.PROGRAMFILES, 'Google', 'Chrome', 'Application', 'chrome.exe')
+        : '',
+      process.env['PROGRAMFILES(X86)']
+        ? path.join(
+            process.env['PROGRAMFILES(X86)'],
+            'Google',
+            'Chrome',
+            'Application',
+            'chrome.exe',
+          )
+        : '',
+    ].filter(Boolean);
+  }
+  return [];
+}
+
 function resolvePuppeteerExecutablePath(): string | undefined {
   const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
   if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
@@ -231,17 +280,17 @@ function resolvePuppeteerExecutablePath(): string | undefined {
   } catch {
     /* puppeteer may throw if browser not installed */
   }
-  if (process.platform === 'linux') {
-    for (const candidate of LINUX_CHROMIUM_CANDIDATES) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
+  for (const candidate of browserExecutableCandidates()) {
+    if (fs.existsSync(candidate)) return candidate;
   }
   return undefined;
 }
 
 function puppeteerUnavailableMessage(cause?: string): string {
   const hint =
-    'On the VPS, ensure @sparticuz/chromium is installed (npm ci) or set PUPPETEER_EXECUTABLE_PATH to a working Chromium binary.';
+    process.env.NODE_ENV === 'production'
+      ? 'On the VPS, keep @sparticuz/chromium installed with npm ci, or set PUPPETEER_EXECUTABLE_PATH to a working Linux Chromium binary.'
+      : 'Locally, install Google Chrome/Chromium, run `npx puppeteer browsers install chrome`, or set PUPPETEER_EXECUTABLE_PATH to a working browser binary.';
   return cause
     ? `Coupon PDF export is unavailable (${cause}). ${hint}`
     : `Coupon PDF export is unavailable. ${hint}`;
@@ -546,9 +595,6 @@ export class CouponsService {
     if (coupons.length === 0) throw new NotFoundException('Batch not found');
 
     const assets = loadCouponFrontSvgAssets();
-    const DESIGN_H = 245;
-    const faceWmm = 180;
-    const faceHmm = (faceWmm * DESIGN_H) / 660;
 
     const couponPages: string[] = [];
     for (
@@ -567,7 +613,7 @@ export class CouponsService {
         const points = Number(c.points ?? 0);
         const qr = await QRCode.toDataURL(code, { margin: 0, width: 520 });
         const idSuffix = `f${pageStart + j}`;
-        faces.push(`<div class="face" style="width:${faceWmm}mm;height:${faceHmm}mm;">
+        faces.push(`<div class="face">
             ${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}
           </div>`);
       }
@@ -631,8 +677,8 @@ export class CouponsService {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <style>
             body { margin: 0; padding: 24px; background: #F3F4F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
-            .preview-stack { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; max-width: 660px; margin: 0 auto; }
-            .face { width: 660px; height: 245px; border-radius: 26px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.12); background: #fff; }
+            .preview-stack { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; max-width: ${COUPON_PRINT_WIDTH_IN * COUPON_PREVIEW_SCALE}px; margin: 0 auto; }
+            .face { width: ${COUPON_PRINT_WIDTH_IN * COUPON_PREVIEW_SCALE}px; height: ${COUPON_PRINT_HEIGHT_IN * COUPON_PREVIEW_SCALE}px; border-radius: 26px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.12); background: #fff; }
           </style>
         </head>
         <body>

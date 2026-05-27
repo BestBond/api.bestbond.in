@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AuthUser } from '../auth/auth-user';
 import { RequireAnyPermissions } from '../auth/require-any-permissions.decorator';
@@ -6,6 +6,8 @@ import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateAdminPreferencesDto } from './dto/update-admin-preferences.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ChangePasscodeDto } from './dto/change-passcode.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 
 @Controller('users')
 export class UsersController {
@@ -102,5 +104,26 @@ export class UsersController {
       currentPassword: dto.currentPassword,
       newPassword: dto.newPassword,
     });
+  }
+
+  @Put('me/passcode')
+  changeMyPasscode(@Req() req: Request, @Body() dto: ChangePasscodeDto) {
+    const auth = req.user as AuthUser;
+    return this.users.changePasscode({
+      userId: auth.id,
+      currentPasscode: dto.currentPasscode,
+      newPasscode: dto.newPasscode,
+      confirmNewPasscode: dto.confirmNewPasscode,
+    });
+  }
+
+  /**
+   * Customer/dealer self-service account deletion (mobile Profile → Delete Account).
+   * Requires current 6-digit passcode. Staff accounts are rejected.
+   */
+  @Delete('me')
+  deleteMyAccount(@Req() req: Request, @Body() dto: DeleteAccountDto) {
+    const auth = req.user as AuthUser;
+    return this.users.deleteMyAccount(auth.id, dto.passcode);
   }
 }

@@ -1,7 +1,7 @@
 import { getCouponTierTheme } from './coupon-tiers';
 
 const DESIGN_W = 660;
-const DESIGN_H = 245;
+const DESIGN_H = 330;
 const LEFT_W = 220;
 
 export type CouponFrontSvgAssets = {
@@ -72,23 +72,23 @@ export function buildCouponFrontSvg(params: {
 
   const iconW = 28;
   const iconX = Math.round((LEFT_W - iconW) / 2);
-  const iconY = 14;
-  const qrSize = 150;
+  const iconY = 28;
+  const qrSize = 176;
   const qrX = Math.round((LEFT_W - qrSize) / 2);
   const qrY = iconY + iconW + 10;
   const idY = qrY + qrSize + 14;
 
   const pillW = 330;
-  const pillH = 74;
+  const pillH = 82;
   const pillX = Math.round(RIGHT_X + (RIGHT_W - pillW) / 2);
-  const pillY = 76;
+  const pillY = 116;
   const pillR = Math.round(pillH / 2);
 
   const logoW = 50;
   const logoH = 75;
   const logoPad = 10;
   const logoX = DESIGN_W - logoW - logoPad;
-  const logoY = 12;
+  const logoY = 22;
 
   const leftFill = panelFillAttr(theme, sid);
   const pillFill = pillFillAttr(theme, sid);
@@ -100,7 +100,7 @@ export function buildCouponFrontSvg(params: {
         <clipPath id="c_${sid}">
           <rect x="0" y="0" width="${DESIGN_W}" height="${DESIGN_H}" rx="26" ry="26" />
         </clipPath>
-        <linearGradient id="g_${sid}" x1="${RIGHT_X}" y1="0" x2="${DESIGN_W}" y2="245" gradientUnits="userSpaceOnUse">
+        <linearGradient id="g_${sid}" x1="${RIGHT_X}" y1="0" x2="${DESIGN_W}" y2="${DESIGN_H}" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="#F97316"/>
           <stop offset="1" stop-color="#EA6A12"/>
         </linearGradient>
@@ -110,7 +110,7 @@ export function buildCouponFrontSvg(params: {
         <rect x="0" y="0" width="${LEFT_W}" height="${DESIGN_H}" fill="${leftFill}" />
         <rect x="${RIGHT_X}" y="0" width="${RIGHT_W}" height="${DESIGN_H}" fill="url(#g_${sid})" />
 
-        <path d="M${RIGHT_X + 40} 18C${RIGHT_X + 80} 50 ${RIGHT_X + 150} 78 ${RIGHT_X + 240} 96C${RIGHT_X + 315} 111 ${RIGHT_X + 365} 132 ${RIGHT_X + 420} 162V0H${RIGHT_X}v245h${RIGHT_W}v-26c-62-8-126-30-190-66C${RIGHT_X + 140} 126 ${RIGHT_X + 80} 72 ${RIGHT_X + 40} 18Z" fill="#000" opacity="0.06"/>
+        <path d="M${RIGHT_X + 40} 26C${RIGHT_X + 80} 68 ${RIGHT_X + 150} 106 ${RIGHT_X + 240} 130C${RIGHT_X + 315} 150 ${RIGHT_X + 365} 178 ${RIGHT_X + 420} 218V0H${RIGHT_X}v${DESIGN_H}h${RIGHT_W}v-35c-62-11-126-40-190-89C${RIGHT_X + 140} 170 ${RIGHT_X + 80} 96 ${RIGHT_X + 40} 26Z" fill="#000" opacity="0.06"/>
 
         <image href="${params.assets.couponPhoneScanUri}" x="${iconX}" y="${iconY}" width="${iconW}" height="${iconW}" />
         <image href="${qr}" x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" preserveAspectRatio="xMidYMid meet" />
@@ -123,11 +123,11 @@ export function buildCouponFrontSvg(params: {
 
         <rect x="${pillX}" y="${pillY}" width="${pillW}" height="${pillH}" rx="${pillR}" ry="${pillR}"
           fill="${pillFill}" stroke="${theme.pillStroke}" stroke-width="${theme.pillStrokeWidth}" />
-        <text x="${pillX + Math.round(pillW / 2)}" y="${pillY + 50}" text-anchor="middle"
+        <text x="${pillX + Math.round(pillW / 2)}" y="${pillY + 55}" text-anchor="middle"
           font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           font-size="36" font-weight="900" fill="#1F2937">${escapeHtml(fmtPoints(points))} Points</text>
 
-        <text x="${RIGHT_X + Math.round(RIGHT_W / 2)}" y="198" text-anchor="middle"
+        <text x="${RIGHT_X + Math.round(RIGHT_W / 2)}" y="264" text-anchor="middle"
           font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           font-size="14" font-weight="600" fill="#FFFFFF">Scan in the Best Bond app to redeem</text>
       </g>
