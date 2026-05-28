@@ -14,6 +14,7 @@ import { User } from '../users/entities/user.entity';
 import type { FindOptionsWhere } from 'typeorm';
 import * as path from 'path';
 import * as fs from 'fs';
+import { pathToFileURL } from 'node:url';
 import QRCode from 'qrcode';
 import puppeteer from 'puppeteer';
 import { PDFDocument } from 'pdf-lib';
@@ -100,11 +101,11 @@ function wrapSvgWithBackground(params: {
   `.trim();
 }
 
-/** A4 pages per Chromium PDF pass (lower = less RAM; default 1 page ≈ 7 coupons). */
+/** A4 pages per Chromium PDF pass (lower = less RAM; default 2 pages ≈ 14 coupons). */
 function couponExportPdfChunkPages(): number {
   const raw = process.env.COUPON_EXPORT_PDF_CHUNK_SIZE;
-  const n = raw ? Number(raw) : 1;
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  const n = raw ? Number(raw) : 2;
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
 }
 
 /** Front-only coupon faces per A4 page (print export). */
@@ -137,6 +138,57 @@ function resolveCouponExportAssetPaths(): {
   };
 
   return { readFirstExisting };
+}
+
+function readFirstExistingAssetPath(paths: string[]): string {
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) return pathToFileURL(path.resolve(p)).href;
+    } catch {
+      /* try next */
+    }
+  }
+  throw new NotFoundException(
+    `Coupon export assets missing. Tried: ${paths.join(', ')}`,
+  );
+}
+
+/** File URLs so Chromium loads each asset once (not 1MB data: URI × coupon count). */
+function loadCouponFrontSvgAssetsForPdf(): CouponFrontSvgAssets {
+  const backendAssetsDir = resolveBackendSvgAssetsDir();
+  const backendRoot = path.resolve(__dirname, '../../..');
+  const repoRoot = path.resolve(backendRoot, '..');
+  const appAssetsDir = path.resolve(
+    repoRoot,
+    'RewardSystem',
+    'RewardSystem',
+    'src',
+    'assets',
+    'svgs',
+    'originals',
+  );
+  const mobileAppAssetsDir = path.resolve(
+    repoRoot,
+    'BestBond',
+    'src',
+    'assets',
+    'svgs',
+    'originals',
+  );
+
+  return {
+    couponPhoneScanUri: readFirstExistingAssetPath([
+      path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
+      path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
+      path.join(appAssetsDir, 'coupon_phone_scan.svg'),
+    ]),
+    couponFrontManLogoUri: readFirstExistingAssetPath([
+      ...couponBestBondManSvgPaths(),
+      path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
+      path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
+      path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
+    ]),
+  };
 }
 
 function loadCouponFrontSvgAssets(): CouponFrontSvgAssets {
@@ -624,7 +676,7 @@ export class CouponsService {
     });
     if (coupons.length === 0) throw new NotFoundException('Batch not found');
 
-    const assets = loadCouponFrontSvgAssets();
+    const assets = loadCouponFrontSvgAssetsForPdf();
 
     const couponPages: string[] = [];
     for (
@@ -636,20 +688,18 @@ export class CouponsService {
         pageStart,
         pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
       );
-      const faces: string[] = [];
-      for (let j = 0; j < slice.length; j++) {
-        const c = slice[j];
-        const code = String(c.code);
-        const points = Number(c.points ?? 0);
-        const qr = await QRCode.toDataURL(code, {
-          margin: 0,
-          width: couponFrontQrPixelSize(),
-        });
-        const idSuffix = `f${pageStart + j}`;
-        faces.push(
-          `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`,
-        );
-      }
+      const faces = await Promise.all(
+        slice.map(async (c, j) => {
+          const code = String(c.code);
+          const points = Number(c.points ?? 0);
+          const qr = await QRCode.toDataURL(code, {
+            margin: 0,
+            width: couponFrontQrPixelSize(),
+          });
+          const idSuffix = `f${pageStart + j}`;
+          return `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`;
+        }),
+      );
       couponPages.push(`<div class="page">\n${faces.join('\n')}\n</div>`);
     }
 
