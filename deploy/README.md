@@ -34,7 +34,7 @@ Default port: **`3001`** (when `bestbond.in` uses **3000**)
 
 ## Coupon PDF export (Chromium)
 
-Batch PDF (`GET /coupons/batches/:id/export.pdf`) uses **Puppeteer**. On Linux production the API uses **`@sparticuz/chromium`** automatically (no `apt` / sudo required). Keep `PUPPETEER_SKIP_DOWNLOAD=1` for `npm ci`.
+Batch PDF (`GET /coupons/batches/:id/export.pdf`) uses **Puppeteer**. Each coupon is **101×38 mm** with **5 mm** safe inset; coupons are stacked on A4 with **no gap** between rows. On Linux production the API uses **`@sparticuz/chromium`** automatically (no `apt` / sudo required). Keep `PUPPETEER_SKIP_DOWNLOAD=1` for `npm ci`.
 
 Local development does not use the VPS Chromium path. It first uses Puppeteer's local browser download, then common installed Chrome/Chromium paths for the current OS. Keep local browser settings in `.env.local`; keep VPS settings in `.env.production`.
 

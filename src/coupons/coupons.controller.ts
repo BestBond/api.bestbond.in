@@ -90,7 +90,7 @@ export class CouponsController {
 
   /**
    * Ops Admin/Superadmin: export a coupon batch as print-ready PDF.
-   * 3 coupons per page, stacked vertically.
+   * Print-ready coupons (101×38 mm), stacked vertically with no gap.
    */
   @Get('batches/:batchId/export.pdf')
   @RequirePermissions('coupons.manage')

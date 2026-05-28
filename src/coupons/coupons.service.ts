@@ -21,6 +21,12 @@ import {
   buildCouponFrontSvg,
   type CouponFrontSvgAssets,
 } from './coupon-front-svg';
+import {
+  COUPON_A4_PAGE_MARGIN_MM,
+  COUPON_H_MM,
+  COUPON_W_MM,
+  couponFrontsPerA4Page,
+} from './coupon-print-spec';
 
 /**
  * Coupon design SVGs live under `src/frontend_assets/svgs` and are not copied to `dist/`.
@@ -100,10 +106,8 @@ function couponExportPdfChunkSize(): number {
 }
 
 /** Front-only coupon faces per A4 page (print export). */
-const COUPON_BATCH_PDF_FRONTS_PER_PAGE = 3;
-const COUPON_PRINT_WIDTH_IN = 4;
-const COUPON_PRINT_HEIGHT_IN = 2;
-const COUPON_PREVIEW_SCALE = 120;
+const COUPON_BATCH_PDF_FRONTS_PER_PAGE = couponFrontsPerA4Page();
+const COUPON_PREVIEW_PX_PER_MM = 4;
 
 function toCouponSvgDataUri(svg: string): string {
   const cleaned = svg
@@ -186,22 +190,24 @@ function buildCouponBatchPdfHtml(innerPagesHtml: string): string {
   <head>
     <meta charset="utf-8" />
     <style>
-      @page { size: A4; margin: 10mm; }
+      @page { size: A4; margin: ${COUPON_A4_PAGE_MARGIN_MM}mm; }
       body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
       .page {
         page-break-after: always;
         display: flex;
         flex-direction: column;
-        gap: 8mm;
+        gap: 0;
         align-items: center;
       }
+      .page:last-child { page-break-after: auto; }
       .face {
         display: block;
-        width: ${COUPON_PRINT_WIDTH_IN}in;
-        height: ${COUPON_PRINT_HEIGHT_IN}in;
-        border-radius: 8mm;
+        width: ${COUPON_W_MM}mm;
+        height: ${COUPON_H_MM}mm;
+        border-radius: 0;
         overflow: hidden;
         flex-shrink: 0;
+        line-height: 0;
       }
     </style>
   </head>
@@ -651,7 +657,10 @@ export class CouponsService {
         : 0;
     const perPage =
       params.perPage != null && Number.isFinite(params.perPage)
-        ? Math.max(1, Math.min(6, Math.floor(params.perPage)))
+        ? Math.max(
+            1,
+            Math.min(COUPON_BATCH_PDF_FRONTS_PER_PAGE, Math.floor(params.perPage)),
+          )
         : COUPON_BATCH_PDF_FRONTS_PER_PAGE;
 
     const slice = coupons.slice(index, index + perPage);
@@ -677,8 +686,8 @@ export class CouponsService {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <style>
             body { margin: 0; padding: 24px; background: #F3F4F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
-            .preview-stack { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; max-width: ${COUPON_PRINT_WIDTH_IN * COUPON_PREVIEW_SCALE}px; margin: 0 auto; }
-            .face { width: ${COUPON_PRINT_WIDTH_IN * COUPON_PREVIEW_SCALE}px; height: ${COUPON_PRINT_HEIGHT_IN * COUPON_PREVIEW_SCALE}px; border-radius: 26px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.12); background: #fff; }
+            .preview-stack { display: flex; flex-direction: column; gap: 0; align-items: flex-start; max-width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; margin: 0 auto; }
+            .face { width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; height: ${COUPON_H_MM * COUPON_PREVIEW_PX_PER_MM}px; border-radius: 0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: #fff; }
           </style>
         </head>
         <body>
