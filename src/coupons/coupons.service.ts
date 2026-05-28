@@ -14,12 +14,12 @@ import { User } from '../users/entities/user.entity';
 import type { FindOptionsWhere } from 'typeorm';
 import * as path from 'path';
 import * as fs from 'fs';
-import { pathToFileURL } from 'node:url';
 import QRCode from 'qrcode';
 import puppeteer from 'puppeteer';
 import { PDFDocument } from 'pdf-lib';
 import {
   buildCouponFrontSvg,
+  buildCouponSharedAssetDefs,
   couponFrontQrPixelSize,
   type CouponFrontSvgAssets,
 } from './coupon-front-svg';
@@ -140,57 +140,6 @@ function resolveCouponExportAssetPaths(): {
   return { readFirstExisting };
 }
 
-function readFirstExistingAssetPath(paths: string[]): string {
-  for (const p of paths) {
-    try {
-      if (fs.existsSync(p)) return pathToFileURL(path.resolve(p)).href;
-    } catch {
-      /* try next */
-    }
-  }
-  throw new NotFoundException(
-    `Coupon export assets missing. Tried: ${paths.join(', ')}`,
-  );
-}
-
-/** File URLs so Chromium loads each asset once (not 1MB data: URI × coupon count). */
-function loadCouponFrontSvgAssetsForPdf(): CouponFrontSvgAssets {
-  const backendAssetsDir = resolveBackendSvgAssetsDir();
-  const backendRoot = path.resolve(__dirname, '../../..');
-  const repoRoot = path.resolve(backendRoot, '..');
-  const appAssetsDir = path.resolve(
-    repoRoot,
-    'RewardSystem',
-    'RewardSystem',
-    'src',
-    'assets',
-    'svgs',
-    'originals',
-  );
-  const mobileAppAssetsDir = path.resolve(
-    repoRoot,
-    'BestBond',
-    'src',
-    'assets',
-    'svgs',
-    'originals',
-  );
-
-  return {
-    couponPhoneScanUri: readFirstExistingAssetPath([
-      path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
-      path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
-      path.join(appAssetsDir, 'coupon_phone_scan.svg'),
-    ]),
-    couponFrontManLogoUri: readFirstExistingAssetPath([
-      ...couponBestBondManSvgPaths(),
-      path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
-      path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
-      path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
-    ]),
-  };
-}
-
 function loadCouponFrontSvgAssets(): CouponFrontSvgAssets {
   const { readFirstExisting } = resolveCouponExportAssetPaths();
   const backendAssetsDir = resolveBackendSvgAssetsDir();
@@ -238,7 +187,10 @@ function puppeteerPdfTimeoutMs(): number {
   return Number.isFinite(n) && n >= 30_000 ? Math.floor(n) : 180_000;
 }
 
-function buildCouponBatchPdfHtml(innerPagesHtml: string): string {
+function buildCouponBatchPdfHtml(
+  innerPagesHtml: string,
+  sharedAssetDefsHtml: string,
+): string {
   return `<!doctype html>
 <html>
   <head>
@@ -280,6 +232,7 @@ function buildCouponBatchPdfHtml(innerPagesHtml: string): string {
     </style>
   </head>
   <body>
+${sharedAssetDefsHtml}
 ${innerPagesHtml}
   </body>
 </html>`;
@@ -676,7 +629,8 @@ export class CouponsService {
     });
     if (coupons.length === 0) throw new NotFoundException('Batch not found');
 
-    const assets = loadCouponFrontSvgAssetsForPdf();
+    const assets = loadCouponFrontSvgAssets();
+    const sharedAssetDefsHtml = buildCouponSharedAssetDefs(assets);
 
     const couponPages: string[] = [];
     for (
@@ -697,7 +651,7 @@ export class CouponsService {
             width: couponFrontQrPixelSize(),
           });
           const idSuffix = `f${pageStart + j}`;
-          return `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`;
+          return `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets, useSharedAssets: true })}</div>`;
         }),
       );
       couponPages.push(`<div class="page">\n${faces.join('\n')}\n</div>`);
@@ -723,7 +677,10 @@ export class CouponsService {
     try {
       for (let offset = 0; offset < couponPages.length; offset += chunkPages) {
         const slice = couponPages.slice(offset, offset + chunkPages);
-        const html = buildCouponBatchPdfHtml(slice.join(''));
+        const html = buildCouponBatchPdfHtml(
+          slice.join(''),
+          sharedAssetDefsHtml,
+        );
         try {
           pdfParts.push(await htmlToCouponPdfBuffer(html, browser));
         } catch (pdfErr) {

@@ -18,6 +18,22 @@ export type CouponFrontSvgAssets = {
   couponFrontManLogoUri: string;
 };
 
+/** IDs for assets declared once per PDF HTML document (see buildCouponSharedAssetDefs). */
+export const COUPON_ASSET_SCAN_ID = 'couponAssetScan';
+export const COUPON_ASSET_LOGO_ID = 'couponAssetLogo';
+
+/** Embed scan + logo once per PDF; coupons reference via &lt;use href="#…"&gt;. */
+export function buildCouponSharedAssetDefs(assets: CouponFrontSvgAssets): string {
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <image id="${COUPON_ASSET_SCAN_ID}" href="${assets.couponPhoneScanUri}" width="132" height="133" preserveAspectRatio="xMidYMid meet" />
+        <image id="${COUPON_ASSET_LOGO_ID}" href="${assets.couponFrontManLogoUri}" width="306" height="460" preserveAspectRatio="xMidYMid meet" />
+      </defs>
+    </svg>
+  `.trim();
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -74,6 +90,8 @@ export function buildCouponFrontSvg(params: {
   qrDataUrl: string;
   idSuffix: string;
   assets: CouponFrontSvgAssets;
+  /** When true, logo/scan use shared document defs (batch PDF). */
+  useSharedAssets?: boolean;
 }): string {
   const code = params.code;
   const points = params.points;
@@ -130,8 +148,15 @@ export function buildCouponFrontSvg(params: {
   const swooshPath =
     'M40 18C80 50 150 78 240 96C315 111 365 132 420 162V0H0v245h440v-26c-62-8-126-30-190-66C140 126 80 72 40 18Z';
 
+  const scanGraphic = params.useSharedAssets
+    ? `<use href="#${COUPON_ASSET_SCAN_ID}" xlink:href="#${COUPON_ASSET_SCAN_ID}" x="${iconX}" y="${iconY}" width="${iconW}" height="${iconH}" />`
+    : `<image href="${params.assets.couponPhoneScanUri}" x="${iconX}" y="${iconY}" width="${iconW}" height="${iconH}" preserveAspectRatio="xMidYMid meet" />`;
+  const logoGraphic = params.useSharedAssets
+    ? `<use href="#${COUPON_ASSET_LOGO_ID}" xlink:href="#${COUPON_ASSET_LOGO_ID}" x="${logoX}" y="${logoY}" width="${logoW}" height="${logoH}" />`
+    : `<image href="${params.assets.couponFrontManLogoUri}" x="${logoX}" y="${logoY}" width="${logoW}" height="${logoH}" preserveAspectRatio="xMidYMid meet" />`;
+
   return `
-    <svg viewBox="0 0 ${COUPON_DESIGN_W} ${COUPON_DESIGN_H}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
+    <svg viewBox="0 0 ${COUPON_DESIGN_W} ${COUPON_DESIGN_H}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" shape-rendering="geometricPrecision">
       <defs>
         <clipPath id="c_${sid}">
           <rect x="0" y="0" width="${COUPON_DESIGN_W}" height="${COUPON_DESIGN_H}" />
@@ -165,14 +190,14 @@ export function buildCouponFrontSvg(params: {
           </g>
         </g>
 
-        <image href="${params.assets.couponPhoneScanUri}" x="${iconX}" y="${iconY}" width="${iconW}" height="${iconH}" preserveAspectRatio="xMidYMid meet" />
+        ${scanGraphic}
         <image href="${qr}" x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" preserveAspectRatio="xMidYMid meet" />
 
         <text x="${ox + Math.round(LEFT_W / 2)}" y="${idY}" text-anchor="middle"
           font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           font-size="${idFontSize}" font-weight="500" fill="#667085">${escapeHtml(idLabel)}</text>
 
-        <image href="${params.assets.couponFrontManLogoUri}" x="${logoX}" y="${logoY}" width="${logoW}" height="${logoH}" preserveAspectRatio="xMidYMid meet" />
+        ${logoGraphic}
 
         <rect x="${pillX}" y="${pillY}" width="${pillW}" height="${pillH}" rx="${pillR}" ry="${pillR}"
           fill="${pillFill}" stroke="${theme.pillStroke}" stroke-width="${theme.pillStrokeWidth}"
