@@ -19,6 +19,7 @@ import puppeteer from 'puppeteer';
 import { PDFDocument } from 'pdf-lib';
 import {
   buildCouponFrontSvg,
+  couponFrontQrPixelSize,
   type CouponFrontSvgAssets,
 } from './coupon-front-svg';
 import {
@@ -640,7 +641,10 @@ export class CouponsService {
         const c = slice[j];
         const code = String(c.code);
         const points = Number(c.points ?? 0);
-        const qr = await QRCode.toDataURL(code, { margin: 0, width: 280 });
+        const qr = await QRCode.toDataURL(code, {
+          margin: 0,
+          width: couponFrontQrPixelSize(),
+        });
         const idSuffix = `f${pageStart + j}`;
         faces.push(
           `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`,
@@ -722,7 +726,10 @@ export class CouponsService {
       const c = slice[i];
       const code = String(c.code);
       const points = Number(c.points ?? 0);
-      const qr = await QRCode.toDataURL(code, { margin: 0, width: 280 });
+      const qr = await QRCode.toDataURL(code, {
+        margin: 0,
+        width: couponFrontQrPixelSize(),
+      });
       const idSuffix = `pv${index + i}`;
       blocks.push(
         `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`,
