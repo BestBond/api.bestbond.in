@@ -98,11 +98,11 @@ function wrapSvgWithBackground(params: {
   `.trim();
 }
 
-/** Limits Chromium memory per pass; merged into one PDF. */
-function couponExportPdfChunkSize(): number {
+/** A4 pages per Chromium PDF pass (lower = less RAM; default 1 page ≈ 7 coupons). */
+function couponExportPdfChunkPages(): number {
   const raw = process.env.COUPON_EXPORT_PDF_CHUNK_SIZE;
-  const n = raw ? Number(raw) : 20;
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 20;
+  const n = raw ? Number(raw) : 1;
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
 }
 
 /** Front-only coupon faces per A4 page (print export). */
@@ -316,6 +316,7 @@ async function launchPuppeteerForPdf(
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
+    '--disable-gpu',
     '--disable-crash-reporter',
   ];
 
@@ -355,24 +356,25 @@ function isPuppeteerLaunchError(err: unknown): boolean {
   );
 }
 
-async function htmlToCouponPdfBuffer(html: string): Promise<Uint8Array> {
-  const timeoutMs = puppeteerPdfTimeoutMs();
+function isPuppeteerCrashError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? `${err.name}: ${err.message}`
+      : String(err ?? '');
+  return /Target closed|Protocol error|OOM|out of memory|killed|Session closed/i.test(
+    msg,
+  );
+}
 
-  let browser: Awaited<ReturnType<typeof puppeteer.launch>>;
+type PuppeteerBrowser = Awaited<ReturnType<typeof puppeteer.launch>>;
+
+async function htmlToCouponPdfBuffer(
+  html: string,
+  browser: PuppeteerBrowser,
+): Promise<Uint8Array> {
+  const timeoutMs = puppeteerPdfTimeoutMs();
+  const page = await browser.newPage();
   try {
-    browser = await launchPuppeteerForPdf(timeoutMs);
-  } catch (firstErr) {
-    if (isPuppeteerLaunchError(firstErr)) {
-      throw new ServiceUnavailableException(
-        puppeteerUnavailableMessage(
-          firstErr instanceof Error ? firstErr.message : String(firstErr),
-        ),
-      );
-    }
-    throw firstErr;
-  }
-  try {
-    const page = await browser.newPage();
     page.setDefaultTimeout(timeoutMs);
     await page.setContent(html, {
       waitUntil: 'domcontentloaded',
@@ -384,7 +386,7 @@ async function htmlToCouponPdfBuffer(html: string): Promise<Uint8Array> {
       preferCSSPageSize: true,
     });
   } finally {
-    await browser.close();
+    await page.close();
   }
 }
 
@@ -617,7 +619,7 @@ export class CouponsService {
         const c = slice[j];
         const code = String(c.code);
         const points = Number(c.points ?? 0);
-        const qr = await QRCode.toDataURL(code, { margin: 0, width: 520 });
+        const qr = await QRCode.toDataURL(code, { margin: 0, width: 280 });
         const idSuffix = `f${pageStart + j}`;
         faces.push(`<div class="face">
             ${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}
@@ -626,12 +628,40 @@ export class CouponsService {
       couponPages.push(`<div class="page">\n${faces.join('\n')}\n</div>`);
     }
 
-    const chunkSize = couponExportPdfChunkSize();
+    const chunkPages = couponExportPdfChunkPages();
+    const timeoutMs = puppeteerPdfTimeoutMs();
+    let browser: PuppeteerBrowser;
+    try {
+      browser = await launchPuppeteerForPdf(timeoutMs);
+    } catch (firstErr) {
+      if (isPuppeteerLaunchError(firstErr)) {
+        throw new ServiceUnavailableException(
+          puppeteerUnavailableMessage(
+            firstErr instanceof Error ? firstErr.message : String(firstErr),
+          ),
+        );
+      }
+      throw firstErr;
+    }
+
     const pdfParts: Uint8Array[] = [];
-    for (let offset = 0; offset < couponPages.length; offset += chunkSize) {
-      const slice = couponPages.slice(offset, offset + chunkSize);
-      const html = buildCouponBatchPdfHtml(slice.join(''));
-      pdfParts.push(await htmlToCouponPdfBuffer(html));
+    try {
+      for (let offset = 0; offset < couponPages.length; offset += chunkPages) {
+        const slice = couponPages.slice(offset, offset + chunkPages);
+        const html = buildCouponBatchPdfHtml(slice.join(''));
+        try {
+          pdfParts.push(await htmlToCouponPdfBuffer(html, browser));
+        } catch (pdfErr) {
+          if (isPuppeteerCrashError(pdfErr)) {
+            throw new ServiceUnavailableException(
+              'Coupon PDF export ran out of memory. Try again, or export a smaller batch.',
+            );
+          }
+          throw pdfErr;
+        }
+      }
+    } finally {
+      await browser.close().catch(() => undefined);
     }
     return mergeCouponPdfBuffers(pdfParts);
   }
@@ -671,7 +701,7 @@ export class CouponsService {
       const c = slice[i];
       const code = String(c.code);
       const points = Number(c.points ?? 0);
-      const qr = await QRCode.toDataURL(code, { margin: 0, width: 520 });
+      const qr = await QRCode.toDataURL(code, { margin: 0, width: 280 });
       const idSuffix = `pv${index + i}`;
       blocks.push(
         `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`,
