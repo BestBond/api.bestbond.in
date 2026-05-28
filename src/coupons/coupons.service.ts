@@ -22,6 +22,7 @@ import {
   type CouponFrontSvgAssets,
 } from './coupon-front-svg';
 import {
+  COUPON_A4_HORIZONTAL_MARGIN_MM,
   COUPON_A4_PAGE_MARGIN_MM,
   COUPON_H_MM,
   COUPON_W_MM,
@@ -401,8 +402,8 @@ async function htmlToCouponPdfBuffer(
       margin: {
         top: `${COUPON_A4_PAGE_MARGIN_MM}mm`,
         bottom: `${COUPON_A4_PAGE_MARGIN_MM}mm`,
-        left: 'auto',
-        right: 'auto',
+        left: `${COUPON_A4_HORIZONTAL_MARGIN_MM}mm`,
+        right: `${COUPON_A4_HORIZONTAL_MARGIN_MM}mm`,
       },
     });
   } finally {
