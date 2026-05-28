@@ -19,8 +19,9 @@ import puppeteer from 'puppeteer';
 import { PDFDocument } from 'pdf-lib';
 import {
   buildCouponFrontSvg,
-  buildCouponSharedAssetDefs,
+  buildCouponPrintPageSvg,
   couponFrontQrPixelSize,
+  type CouponFrontFaceInput,
   type CouponFrontSvgAssets,
 } from './coupon-front-svg';
 import {
@@ -187,53 +188,37 @@ function puppeteerPdfTimeoutMs(): number {
   return Number.isFinite(n) && n >= 30_000 ? Math.floor(n) : 180_000;
 }
 
-function buildCouponBatchPdfHtml(
-  innerPagesHtml: string,
-  sharedAssetDefsHtml: string,
-): string {
+function buildCouponBatchPdfHtml(pagesHtml: string): string {
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <style>
       @page { size: A4; margin: ${COUPON_A4_PAGE_MARGIN_MM}mm; }
-      * { box-sizing: border-box; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
       html, body { margin: 0; padding: 0; }
       body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
       .page {
+        display: block;
         page-break-after: always;
+        page-break-inside: avoid;
         width: ${COUPON_W_MM}mm;
         margin: 0 auto;
-        padding: 0;
         line-height: 0;
         font-size: 0;
+        overflow: hidden;
       }
       .page:last-child { page-break-after: auto; }
-      .face {
+      .page > svg {
         display: block;
         width: ${COUPON_W_MM}mm;
-        height: ${COUPON_H_MM}mm;
-        min-height: ${COUPON_H_MM}mm;
-        max-height: ${COUPON_H_MM}mm;
-        margin: 0;
-        padding: 0;
-        border: 0;
-        border-radius: 0 !important;
-        overflow: hidden;
-        line-height: 0;
-        page-break-inside: avoid;
-      }
-      .face svg {
-        display: block;
-        width: ${COUPON_W_MM}mm;
-        height: ${COUPON_H_MM}mm;
+        vertical-align: top;
         border-radius: 0 !important;
       }
     </style>
   </head>
   <body>
-${sharedAssetDefsHtml}
-${innerPagesHtml}
+${pagesHtml}
   </body>
 </html>`;
 }
@@ -630,7 +615,6 @@ export class CouponsService {
     if (coupons.length === 0) throw new NotFoundException('Batch not found');
 
     const assets = loadCouponFrontSvgAssets();
-    const sharedAssetDefsHtml = buildCouponSharedAssetDefs(assets);
 
     const couponPages: string[] = [];
     for (
@@ -642,7 +626,7 @@ export class CouponsService {
         pageStart,
         pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
       );
-      const faces = await Promise.all(
+      const faces: CouponFrontFaceInput[] = await Promise.all(
         slice.map(async (c, j) => {
           const code = String(c.code);
           const points = Number(c.points ?? 0);
@@ -650,11 +634,16 @@ export class CouponsService {
             margin: 0,
             width: couponFrontQrPixelSize(),
           });
-          const idSuffix = `f${pageStart + j}`;
-          return `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets, useSharedAssets: true })}</div>`;
+          return {
+            code,
+            points,
+            qrDataUrl: qr,
+            idSuffix: `f${pageStart + j}`,
+          };
         }),
       );
-      couponPages.push(`<div class="page">\n${faces.join('\n')}\n</div>`);
+      const pageSvg = buildCouponPrintPageSvg(faces, assets);
+      couponPages.push(`<div class="page">${pageSvg}</div>`);
     }
 
     const chunkPages = couponExportPdfChunkPages();
@@ -677,10 +666,7 @@ export class CouponsService {
     try {
       for (let offset = 0; offset < couponPages.length; offset += chunkPages) {
         const slice = couponPages.slice(offset, offset + chunkPages);
-        const html = buildCouponBatchPdfHtml(
-          slice.join(''),
-          sharedAssetDefsHtml,
-        );
+        const html = buildCouponBatchPdfHtml(slice.join(''));
         try {
           pdfParts.push(await htmlToCouponPdfBuffer(html, browser));
         } catch (pdfErr) {
