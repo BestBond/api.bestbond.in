@@ -191,23 +191,30 @@ function buildCouponBatchPdfHtml(innerPagesHtml: string): string {
     <meta charset="utf-8" />
     <style>
       @page { size: A4; margin: ${COUPON_A4_PAGE_MARGIN_MM}mm; }
-      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
       .page {
         page-break-after: always;
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-        align-items: center;
+        width: ${COUPON_W_MM}mm;
+        margin: 0 auto;
+        font-size: 0;
+        line-height: 0;
       }
       .page:last-child { page-break-after: auto; }
       .face {
         display: block;
         width: ${COUPON_W_MM}mm;
         height: ${COUPON_H_MM}mm;
-        border-radius: 0;
         overflow: hidden;
-        flex-shrink: 0;
+        border-radius: 0;
+        margin: 0;
+        padding: 0;
         line-height: 0;
+      }
+      .face svg {
+        display: block;
+        width: ${COUPON_W_MM}mm;
+        height: ${COUPON_H_MM}mm;
       }
     </style>
   </head>
@@ -621,9 +628,9 @@ export class CouponsService {
         const points = Number(c.points ?? 0);
         const qr = await QRCode.toDataURL(code, { margin: 0, width: 280 });
         const idSuffix = `f${pageStart + j}`;
-        faces.push(`<div class="face">
-            ${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}
-          </div>`);
+        faces.push(
+          `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`,
+        );
       }
       couponPages.push(`<div class="page">\n${faces.join('\n')}\n</div>`);
     }
