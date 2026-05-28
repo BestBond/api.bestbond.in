@@ -191,30 +191,37 @@ function buildCouponBatchPdfHtml(innerPagesHtml: string): string {
     <meta charset="utf-8" />
     <style>
       @page { size: A4; margin: ${COUPON_A4_PAGE_MARGIN_MM}mm; }
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      * { box-sizing: border-box; }
       html, body { margin: 0; padding: 0; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
       .page {
         page-break-after: always;
         width: ${COUPON_W_MM}mm;
         margin: 0 auto;
-        font-size: 0;
+        padding: 0;
         line-height: 0;
+        font-size: 0;
       }
       .page:last-child { page-break-after: auto; }
       .face {
         display: block;
         width: ${COUPON_W_MM}mm;
         height: ${COUPON_H_MM}mm;
-        overflow: hidden;
-        border-radius: 0;
+        min-height: ${COUPON_H_MM}mm;
+        max-height: ${COUPON_H_MM}mm;
         margin: 0;
         padding: 0;
+        border: 0;
+        border-radius: 0 !important;
+        overflow: hidden;
         line-height: 0;
+        page-break-inside: avoid;
       }
       .face svg {
         display: block;
         width: ${COUPON_W_MM}mm;
         height: ${COUPON_H_MM}mm;
+        border-radius: 0 !important;
       }
     </style>
   </head>
@@ -390,7 +397,13 @@ async function htmlToCouponPdfBuffer(
     return await page.pdf({
       format: 'A4',
       printBackground: true,
-      preferCSSPageSize: true,
+      preferCSSPageSize: false,
+      margin: {
+        top: `${COUPON_A4_PAGE_MARGIN_MM}mm`,
+        bottom: `${COUPON_A4_PAGE_MARGIN_MM}mm`,
+        left: 'auto',
+        right: 'auto',
+      },
     });
   } finally {
     await page.close();
@@ -723,8 +736,8 @@ export class CouponsService {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <style>
             body { margin: 0; padding: 24px; background: #F3F4F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
-            .preview-stack { display: flex; flex-direction: column; gap: 0; align-items: flex-start; max-width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; margin: 0 auto; }
-            .face { width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; height: ${COUPON_H_MM * COUPON_PREVIEW_PX_PER_MM}px; border-radius: 0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); background: #fff; }
+            .preview-stack { display: block; max-width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; margin: 0 auto; line-height: 0; font-size: 0; }
+            .face { display: block; width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; height: ${COUPON_H_MM * COUPON_PREVIEW_PX_PER_MM}px; margin: 0; border-radius: 0 !important; overflow: hidden; background: #fff; }
           </style>
         </head>
         <body>

@@ -2,6 +2,8 @@ import { getCouponTierTheme } from './coupon-tiers';
 import {
   COUPON_DESIGN_H,
   COUPON_DESIGN_W,
+  COUPON_INNER_H,
+  COUPON_INNER_W,
   COUPON_SAFE_INSET_U,
 } from './coupon-print-spec';
 
@@ -33,7 +35,7 @@ function tierGradientDefs(
     .map((s) => `<stop offset="${s.offset}" stop-color="${s.color}"/>`)
     .join('');
   return `
-    <linearGradient id="tierGrad_panel_${sid}" x1="0" y1="0" x2="${leftW}" y2="${COUPON_DESIGN_H}" gradientUnits="userSpaceOnUse">
+    <linearGradient id="tierGrad_panel_${sid}" x1="0" y1="0" x2="${leftW}" y2="${COUPON_INNER_H}" gradientUnits="userSpaceOnUse">
       ${stops}
     </linearGradient>
     <linearGradient id="tierGrad_pill_${sid}" x1="0" y1="0" x2="260" y2="52" gradientUnits="userSpaceOnUse">
@@ -69,70 +71,69 @@ export function buildCouponFrontSvg(params: {
   const sid = params.idSuffix.replace(/[^a-zA-Z0-9_]/g, '_');
   const theme = getCouponTierTheme(points);
 
-  const inset = COUPON_SAFE_INSET_U;
-  const LEFT_W = 340;
-  const RIGHT_X = LEFT_W;
-  const RIGHT_W = COUPON_DESIGN_W - LEFT_W;
+  const ox = COUPON_SAFE_INSET_U;
+  const oy = COUPON_SAFE_INSET_U;
 
+  /** ~34 mm QR column inside the 91 mm safe content width */
+  const LEFT_W = 340;
+  const RIGHT_X = ox + LEFT_W;
+  const RIGHT_W = COUPON_INNER_W - LEFT_W;
+
+  const leftPadX = 24;
   const iconW = 16;
-  const qrSize = Math.min(LEFT_W - inset * 2, 108);
+  const qrSize = Math.min(LEFT_W - leftPadX * 2, 112);
   const idFontSize = code.length > 14 ? 9 : 10;
 
-  const stackH = iconW + 4 + qrSize + 10 + idFontSize + 4;
-  const stackTop = Math.round((COUPON_DESIGN_H - stackH) / 2);
-  const iconX = Math.round((LEFT_W - iconW) / 2);
+  const stackH = iconW + 4 + qrSize + 6 + idFontSize + 4;
+  const stackTop = oy + Math.round((COUPON_INNER_H - stackH) / 2);
+  const iconX = ox + Math.round((LEFT_W - iconW) / 2);
   const iconY = stackTop;
-  const qrX = Math.max(inset, Math.round((LEFT_W - qrSize) / 2));
+  const qrX = ox + Math.round((LEFT_W - qrSize) / 2);
   const qrY = iconY + iconW + 4;
-  const idY = qrY + qrSize + 8 + idFontSize;
-  const idLineLeft = inset;
-  const idLineRight = LEFT_W - inset;
-  const idLineAbove = idY - idFontSize - 5;
-  const idLineBelow = idY + 5;
+  const idY = qrY + qrSize + 6 + idFontSize;
 
-  const pillW = Math.min(260, RIGHT_W - inset - 44);
+  const pillW = Math.min(260, RIGHT_W - 56);
   const pillH = 50;
   const pillX = RIGHT_X + Math.round((RIGHT_W - pillW) / 2);
-  const pillY = Math.round((COUPON_DESIGN_H - pillH) / 2) - 4;
-  const pillR = 6;
+  const pillY = oy + Math.round((COUPON_INNER_H - pillH) / 2) - 4;
+  const pillR = 0;
 
   const logoW = 38;
   const logoH = 56;
-  const logoX = COUPON_DESIGN_W - logoW - inset;
-  const logoY = inset;
+  const logoX = ox + COUPON_INNER_W - logoW - 6;
+  const logoY = oy + 8;
 
   const leftFill = panelFillAttr(theme, sid);
   const pillFill = pillFillAttr(theme, sid);
   const tierDefs = tierGradientDefs(theme, sid, LEFT_W);
 
-  const taglineY = COUPON_DESIGN_H - inset;
+  const taglineY = oy + COUPON_INNER_H - 10;
 
   return `
-    <svg viewBox="0 0 ${COUPON_DESIGN_W} ${COUPON_DESIGN_H}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 ${COUPON_DESIGN_W} ${COUPON_DESIGN_H}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" style="border-radius:0">
       <defs>
         <clipPath id="c_${sid}">
           <rect x="0" y="0" width="${COUPON_DESIGN_W}" height="${COUPON_DESIGN_H}" />
         </clipPath>
-        <linearGradient id="g_${sid}" x1="${RIGHT_X}" y1="0" x2="${COUPON_DESIGN_W}" y2="${COUPON_DESIGN_H}" gradientUnits="userSpaceOnUse">
+        <linearGradient id="g_${sid}" x1="${RIGHT_X}" y1="${oy}" x2="${RIGHT_X + RIGHT_W}" y2="${oy + COUPON_INNER_H}" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="#F97316"/>
           <stop offset="1" stop-color="#EA6A12"/>
         </linearGradient>
         ${tierDefs}
       </defs>
       <g clip-path="url(#c_${sid})">
-        <rect x="0" y="0" width="${LEFT_W}" height="${COUPON_DESIGN_H}" fill="${leftFill}" />
-        <rect x="${RIGHT_X}" y="0" width="${RIGHT_W}" height="${COUPON_DESIGN_H}" fill="url(#g_${sid})" />
+        <rect x="0" y="0" width="${COUPON_DESIGN_W}" height="${COUPON_DESIGN_H}" fill="#FFFFFF" />
+        <rect x="${ox}" y="${oy}" width="${LEFT_W}" height="${COUPON_INNER_H}" fill="${leftFill}" />
+        <rect x="${RIGHT_X}" y="${oy}" width="${RIGHT_W}" height="${COUPON_INNER_H}" fill="url(#g_${sid})" />
 
-        <path d="M${RIGHT_X + 32} 14C${RIGHT_X + 64} 46 ${RIGHT_X + 118} 76 ${RIGHT_X + 188} 96C${RIGHT_X + 248} 110 ${RIGHT_X + 288} 128 ${RIGHT_X + 332} 154V0H${RIGHT_X}v${COUPON_DESIGN_H}h${RIGHT_W}v-24c-48-8-98-30-148-68C${RIGHT_X + 108} 124 ${RIGHT_X + 58} 64 ${RIGHT_X + 32} 14Z" fill="#000" opacity="0.06"/>
+        <path d="M${RIGHT_X + 32} ${oy + 14}C${RIGHT_X + 64} ${oy + 46} ${RIGHT_X + 118} ${oy + 76} ${RIGHT_X + 188} ${oy + 96}C${RIGHT_X + 248} ${oy + 110} ${RIGHT_X + 288} ${oy + 128} ${RIGHT_X + 332} ${oy + 154}V${oy}H${RIGHT_X}v${COUPON_INNER_H}h${RIGHT_W}v-24c-48-8-98-30-148-68C${RIGHT_X + 108} ${oy + 124} ${RIGHT_X + 58} ${oy + 64} ${RIGHT_X + 32} ${oy + 14}Z" fill="#000" opacity="0.06"/>
 
         <image href="${params.assets.couponPhoneScanUri}" x="${iconX}" y="${iconY}" width="${iconW}" height="${iconW}" />
         <image href="${qr}" x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" preserveAspectRatio="xMidYMid meet" />
 
-        <line x1="${idLineLeft}" y1="${idLineAbove}" x2="${idLineRight}" y2="${idLineAbove}" stroke="#C4C4C4" stroke-width="1" />
-        <text x="${Math.round(LEFT_W / 2)}" y="${idY}" text-anchor="middle"
+        <text x="${ox + Math.round(LEFT_W / 2)}" y="${idY}" text-anchor="middle"
           font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           font-size="${idFontSize}" font-weight="700" fill="#6B7280">ID: ${escapeHtml(code)}</text>
-        <line x1="${idLineLeft}" y1="${idLineBelow}" x2="${idLineRight}" y2="${idLineBelow}" stroke="#C4C4C4" stroke-width="1" />
 
         <image href="${params.assets.couponFrontManLogoUri}" x="${logoX}" y="${logoY}" width="${logoW}" height="${logoH}" preserveAspectRatio="xMidYMid meet" />
 
