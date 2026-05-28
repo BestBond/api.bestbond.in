@@ -25,3 +25,8 @@ export function couponFrontsPerA4Page(): number {
   const printableH = 297 - 2 * COUPON_A4_PAGE_MARGIN_MM;
   return Math.max(1, Math.floor(printableH / COUPON_H_MM));
 }
+
+/** Exact PDF page height for N stacked coupons (mm), zero gap between faces. */
+export function couponPrintPageHeightMm(couponCount: number): number {
+  return couponCount * COUPON_H_MM;
+}

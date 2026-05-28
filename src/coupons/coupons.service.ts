@@ -25,11 +25,10 @@ import {
   type CouponFrontSvgAssets,
 } from './coupon-front-svg';
 import {
-  COUPON_A4_HORIZONTAL_MARGIN_MM,
-  COUPON_A4_PAGE_MARGIN_MM,
   COUPON_H_MM,
   COUPON_W_MM,
   couponFrontsPerA4Page,
+  couponPrintPageHeightMm,
 } from './coupon-print-spec';
 
 /**
@@ -100,13 +99,6 @@ function wrapSvgWithBackground(params: {
       ${inner}
     </svg>
   `.trim();
-}
-
-/** A4 pages per Chromium PDF pass (lower = less RAM; default 2 pages ≈ 14 coupons). */
-function couponExportPdfChunkPages(): number {
-  const raw = process.env.COUPON_EXPORT_PDF_CHUNK_SIZE;
-  const n = raw ? Number(raw) : 2;
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2;
 }
 
 /** Front-only coupon faces per A4 page (print export). */
@@ -188,37 +180,48 @@ function puppeteerPdfTimeoutMs(): number {
   return Number.isFinite(n) && n >= 30_000 ? Math.floor(n) : 180_000;
 }
 
-function buildCouponBatchPdfHtml(pagesHtml: string): string {
+function buildCouponBatchPdfHtml(
+  pageSvgHtml: string,
+  couponCountOnPage: number,
+): string {
+  const pageH = couponPrintPageHeightMm(couponCountOnPage);
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <style>
-      @page { size: A4; margin: ${COUPON_A4_PAGE_MARGIN_MM}mm; }
+      @page {
+        size: ${COUPON_W_MM}mm ${pageH}mm;
+        margin: 0;
+      }
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body { margin: 0; padding: 0; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: ${COUPON_W_MM}mm;
+        height: ${pageH}mm;
+        overflow: hidden;
+      }
       body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
       .page {
         display: block;
-        page-break-after: always;
-        page-break-inside: avoid;
         width: ${COUPON_W_MM}mm;
-        margin: 0 auto;
+        height: ${pageH}mm;
         line-height: 0;
         font-size: 0;
         overflow: hidden;
+        border-radius: 0 !important;
       }
-      .page:last-child { page-break-after: auto; }
       .page > svg {
         display: block;
         width: ${COUPON_W_MM}mm;
-        vertical-align: top;
+        height: ${pageH}mm;
         border-radius: 0 !important;
       }
     </style>
   </head>
   <body>
-${pagesHtml}
+    <div class="page">${pageSvgHtml}</div>
   </body>
 </html>`;
 }
@@ -377,8 +380,10 @@ type PuppeteerBrowser = Awaited<ReturnType<typeof puppeteer.launch>>;
 async function htmlToCouponPdfBuffer(
   html: string,
   browser: PuppeteerBrowser,
+  couponCountOnPage: number,
 ): Promise<Uint8Array> {
   const timeoutMs = puppeteerPdfTimeoutMs();
+  const pageH = couponPrintPageHeightMm(couponCountOnPage);
   const page = await browser.newPage();
   try {
     page.setDefaultTimeout(timeoutMs);
@@ -387,15 +392,11 @@ async function htmlToCouponPdfBuffer(
       timeout: timeoutMs,
     });
     return await page.pdf({
-      format: 'A4',
+      width: `${COUPON_W_MM}mm`,
+      height: `${pageH}mm`,
       printBackground: true,
-      preferCSSPageSize: false,
-      margin: {
-        top: `${COUPON_A4_PAGE_MARGIN_MM}mm`,
-        bottom: `${COUPON_A4_PAGE_MARGIN_MM}mm`,
-        left: `${COUPON_A4_HORIZONTAL_MARGIN_MM}mm`,
-        right: `${COUPON_A4_HORIZONTAL_MARGIN_MM}mm`,
-      },
+      preferCSSPageSize: true,
+      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
     });
   } finally {
     await page.close();
@@ -616,7 +617,7 @@ export class CouponsService {
 
     const assets = loadCouponFrontSvgAssets();
 
-    const couponPages: string[] = [];
+    const printPages: { svg: string; count: number }[] = [];
     for (
       let pageStart = 0;
       pageStart < coupons.length;
@@ -642,11 +643,12 @@ export class CouponsService {
           };
         }),
       );
-      const pageSvg = buildCouponPrintPageSvg(faces, assets);
-      couponPages.push(`<div class="page">${pageSvg}</div>`);
+      printPages.push({
+        svg: buildCouponPrintPageSvg(faces, assets),
+        count: faces.length,
+      });
     }
 
-    const chunkPages = couponExportPdfChunkPages();
     const timeoutMs = puppeteerPdfTimeoutMs();
     let browser: PuppeteerBrowser;
     try {
@@ -664,11 +666,12 @@ export class CouponsService {
 
     const pdfParts: Uint8Array[] = [];
     try {
-      for (let offset = 0; offset < couponPages.length; offset += chunkPages) {
-        const slice = couponPages.slice(offset, offset + chunkPages);
-        const html = buildCouponBatchPdfHtml(slice.join(''));
+      for (const printPage of printPages) {
+        const html = buildCouponBatchPdfHtml(printPage.svg, printPage.count);
         try {
-          pdfParts.push(await htmlToCouponPdfBuffer(html, browser));
+          pdfParts.push(
+            await htmlToCouponPdfBuffer(html, browser, printPage.count),
+          );
         } catch (pdfErr) {
           if (isPuppeteerCrashError(pdfErr)) {
             throw new ServiceUnavailableException(

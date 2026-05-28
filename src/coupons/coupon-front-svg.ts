@@ -113,7 +113,7 @@ function layoutCouponFace(code: string) {
 
   const logoW = sxf(50);
   const logoH = syf(75);
-  const logoX = ox + COUPON_INNER_W - sxf(10) - logoW;
+  const logoX = RIGHT_X + RIGHT_W - sxf(10) - logoW;
   const logoY = oy + syf(14);
 
   const pointsFontSize = syf(36);
@@ -202,6 +202,7 @@ export function buildCouponFaceMarkup(params: {
         <clipPath id="c_${sid}">
           <rect x="0" y="0" width="${COUPON_DESIGN_W}" height="${COUPON_DESIGN_H}" />
         </clipPath>
+        <!-- Die-cut outline: sharp 101×38 mm rectangle -->
         <clipPath id="right_${sid}">
           <rect x="${L.RIGHT_X}" y="${L.oy}" width="${L.RIGHT_W}" height="${COUPON_INNER_H}" />
         </clipPath>
@@ -269,10 +270,14 @@ export function buildCouponPrintPageSvg(
 
   return `
     <svg viewBox="0 0 ${COUPON_DESIGN_W} ${pageH}" width="${COUPON_W_MM}mm" height="${count * COUPON_H_MM}mm"
-      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" shape-rendering="geometricPrecision">
+      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" shape-rendering="crispEdges">
       <defs>
-        <image id="${COUPON_ASSET_SCAN_ID}" href="${assets.couponPhoneScanUri}" width="132" height="133" preserveAspectRatio="xMidYMid meet" />
-        <image id="${COUPON_ASSET_LOGO_ID}" href="${assets.couponFrontManLogoUri}" width="306" height="460" preserveAspectRatio="xMidYMid meet" />
+        <symbol id="${COUPON_ASSET_SCAN_ID}" viewBox="0 0 132 133">
+          <image width="132" height="133" href="${assets.couponPhoneScanUri}" preserveAspectRatio="xMidYMid meet" />
+        </symbol>
+        <symbol id="${COUPON_ASSET_LOGO_ID}" viewBox="0 0 306 460">
+          <image width="306" height="460" href="${assets.couponFrontManLogoUri}" preserveAspectRatio="xMidYMid meet" />
+        </symbol>
       </defs>
       ${stacked}
     </svg>
