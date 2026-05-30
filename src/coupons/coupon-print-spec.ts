@@ -2,6 +2,9 @@
 export const COUPON_W_MM = 101;
 export const COUPON_H_MM = 38;
 
+/** Vertical gap between coupons in the PDF (mm). */
+export const COUPON_V_GAP_MM = 5;
+
 /** Keep artwork inside this inset so die-cutting does not clip content. */
 export const COUPON_SAFE_INSET_MM = 5;
 
@@ -10,6 +13,7 @@ export const COUPON_UNITS_PER_MM = 10;
 
 export const COUPON_DESIGN_W = COUPON_W_MM * COUPON_UNITS_PER_MM;
 export const COUPON_DESIGN_H = COUPON_H_MM * COUPON_UNITS_PER_MM;
+export const COUPON_V_GAP_U = COUPON_V_GAP_MM * COUPON_UNITS_PER_MM;
 export const COUPON_SAFE_INSET_U = COUPON_SAFE_INSET_MM * COUPON_UNITS_PER_MM;
 
 export const COUPON_INNER_W = COUPON_DESIGN_W - 2 * COUPON_SAFE_INSET_U;
@@ -26,7 +30,10 @@ export function couponFrontsPerA4Page(): number {
   return Math.max(1, Math.floor(printableH / COUPON_H_MM));
 }
 
-/** Exact PDF page height for N stacked coupons (mm), zero gap between faces. */
+/** Exact PDF page height for N stacked coupons (mm), including gaps. */
 export function couponPrintPageHeightMm(couponCount: number): number {
-  return couponCount * COUPON_H_MM;
+  if (couponCount <= 0) return 0;
+  const totalCouponH = couponCount * COUPON_H_MM;
+  const totalGapH = (couponCount - 1) * COUPON_V_GAP_MM;
+  return totalCouponH + totalGapH;
 }

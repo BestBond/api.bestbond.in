@@ -101,77 +101,40 @@ function wrapSvgWithBackground(params: {
   `.trim();
 }
 
-/** Front-only coupon faces per A4 page (print export). */
-const COUPON_BATCH_PDF_FRONTS_PER_PAGE = couponFrontsPerA4Page();
-const COUPON_PREVIEW_PX_PER_MM = 4;
+/** Reference coupon sheet exported from the supplied design. */
+const COUPON_BATCH_PDF_PAGE_WIDTH_PT = 1072;
+const COUPON_BATCH_PDF_PAGE_HEIGHT_PT = 2800;
+const COUPON_BATCH_PDF_TOP_PADDING_PT = 250;
+const COUPON_BATCH_PDF_GAP_PT = 166;
 
-function toCouponSvgDataUri(svg: string): string {
-  const cleaned = svg
-    .replace(/<\?xml[\s\S]*?\?>/g, '')
-    .replace(/<!DOCTYPE[\s\S]*?>/g, '')
-    .trim();
-  const b64 = Buffer.from(cleaned, 'utf8').toString('base64');
-  return `data:image/svg+xml;base64,${b64}`;
+/** Front-only coupon faces per exported page. */
+const COUPON_BATCH_PDF_FRONTS_PER_PAGE = 6;
+
+/** Chunk size for PDF merging to avoid Puppeteer OOM. */
+function couponExportPdfChunkSize(): number {
+  const raw = process.env.COUPON_EXPORT_PDF_CHUNK_SIZE;
+  if (raw) {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 50;
 }
 
-function resolveCouponExportAssetPaths(): {
-  readFirstExisting: (paths: string[]) => string;
-} {
-  const readFirstExisting = (paths: string[]) => {
-    for (const p of paths) {
-      try {
-        if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
-      } catch {
-        /* try next */
-      }
-    }
-    throw new NotFoundException(
-      `Coupon export assets missing. Tried: ${paths.join(', ')}`,
-    );
-  };
+const COUPON_POINT_PALETTES = [
+  { max: 10, left: '#FFFFFF', pill: '#FFFFFF' },
+  { max: 20, left: '#F7E5BC', pill: '#F7E5BC' },
+  { max: 30, left: '#C9E8D0', pill: '#C9E8D0' },
+  { max: 40, left: '#C98245', pill: '#C98245' },
+  { max: 50, left: '#E9EEF2', pill: '#F4F6F8' },
+  { max: Number.POSITIVE_INFINITY, left: '#E3BD3F', pill: '#D9EBC6' },
+];
 
-  return { readFirstExisting };
-}
-
-function loadCouponFrontSvgAssets(): CouponFrontSvgAssets {
-  const { readFirstExisting } = resolveCouponExportAssetPaths();
-  const backendAssetsDir = resolveBackendSvgAssetsDir();
-  const backendRoot = path.resolve(__dirname, '../../..');
-  const repoRoot = path.resolve(backendRoot, '..');
-  const appAssetsDir = path.resolve(
-    repoRoot,
-    'RewardSystem',
-    'RewardSystem',
-    'src',
-    'assets',
-    'svgs',
-    'originals',
-  );
-  const mobileAppAssetsDir = path.resolve(
-    repoRoot,
-    'BestBond',
-    'src',
-    'assets',
-    'svgs',
-    'originals',
-  );
-
-  const couponPhoneScanSvg = readFirstExisting([
-    path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
-    path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
-    path.join(appAssetsDir, 'coupon_phone_scan.svg'),
-  ]);
-  const couponFrontManLogoSvg = readFirstExisting([
-    ...couponBestBondManSvgPaths(),
-    path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
-    path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
-    path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
-  ]);
-
-  return {
-    couponPhoneScanUri: toCouponSvgDataUri(couponPhoneScanSvg),
-    couponFrontManLogoUri: toCouponSvgDataUri(couponFrontManLogoSvg),
-  };
+function couponPaletteForPoints(points: number): { left: string; pill: string } {
+  const safePoints = Number.isFinite(points) ? Math.max(0, points) : 0;
+  const palette =
+    COUPON_POINT_PALETTES.find((p) => safePoints <= p.max) ??
+    COUPON_POINT_PALETTES[0];
+  return { left: palette.left, pill: palette.pill };
 }
 
 function puppeteerPdfTimeoutMs(): number {
@@ -190,34 +153,21 @@ function buildCouponBatchPdfHtml(
   <head>
     <meta charset="utf-8" />
     <style>
-      @page {
-        size: ${COUPON_W_MM}mm ${pageH}mm;
-        margin: 0;
-      }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: ${COUPON_W_MM}mm;
-        height: ${pageH}mm;
-        overflow: hidden;
-      }
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+      @page { size: ${COUPON_BATCH_PDF_PAGE_WIDTH_PT}pt ${COUPON_BATCH_PDF_PAGE_HEIGHT_PT}pt; margin: 0; }
+      body { margin: 0; background: #151515; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
       .page {
-        display: block;
-        width: ${COUPON_W_MM}mm;
-        height: ${pageH}mm;
-        line-height: 0;
-        font-size: 0;
-        overflow: hidden;
-        border-radius: 0 !important;
+        page-break-after: always;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+        width: ${COUPON_BATCH_PDF_PAGE_WIDTH_PT}pt;
+        min-height: ${COUPON_BATCH_PDF_PAGE_HEIGHT_PT}pt;
+        padding-top: ${COUPON_BATCH_PDF_TOP_PADDING_PT}pt;
+        gap: ${COUPON_BATCH_PDF_GAP_PT}pt;
+        align-items: center;
+        background: #151515;
       }
-      .page > svg {
-        display: block;
-        width: ${COUPON_W_MM}mm;
-        height: ${pageH}mm;
-        border-radius: 0 !important;
-      }
+      .face { display: block; border-radius: 16pt; overflow: hidden; flex-shrink: 0; }
     </style>
   </head>
   <body>
@@ -615,7 +565,73 @@ export class CouponsService {
     });
     if (coupons.length === 0) throw new NotFoundException('Batch not found');
 
-    const assets = loadCouponFrontSvgAssets();
+    const readFirstExisting = (paths: string[]) => {
+      for (const p of paths) {
+        try {
+          if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+        } catch {
+          /* try next */
+        }
+      }
+      throw new NotFoundException(
+        `Coupon export assets missing. Tried: ${paths.join(', ')}`,
+      );
+    };
+
+    // Prefer backend-hosted design assets; fall back to app assets if needed.
+    const backendAssetsDir = resolveBackendSvgAssetsDir();
+    const backendRoot = path.resolve(__dirname, '../../..'); // <repo>/reward-system-backend
+    const repoRoot = path.resolve(backendRoot, '..'); // <repo>
+    const appAssetsDir = path.resolve(
+      repoRoot,
+      'RewardSystem',
+      'RewardSystem',
+      'src',
+      'assets',
+      'svgs',
+      'originals',
+    );
+    const mobileAppAssetsDir = path.resolve(
+      repoRoot,
+      'RewardSystemMobile',
+      'src',
+      'assets',
+      'svgs',
+      'originals',
+    );
+
+    const couponFrontManLogoSvg = readFirstExisting([
+      ...couponBestBondManSvgPaths(),
+      path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
+      path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
+      path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
+    ]);
+
+    const couponPhoneScanSvg = readFirstExisting([
+      path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
+      path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
+      path.join(appAssetsDir, 'coupon_phone_scan.svg'),
+    ]);
+
+    const toSvgDataUri = (svg: string) => {
+      // If the SVG is just a wrapper for a base64 PNG, extract the PNG to avoid double-encoding blur.
+      const pngMatch = svg.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
+      if (pngMatch && pngMatch[1]) {
+        return `data:image/png;base64,${pngMatch[1]}`;
+      }
+
+      const cleaned = svg
+        .replace(/<\?xml[\s\S]*?\?>/g, '')
+        .replace(/<!DOCTYPE[\s\S]*?>/g, '')
+        .trim();
+      const b64 = Buffer.from(cleaned, 'utf8').toString('base64');
+      return `data:image/svg+xml;base64,${b64}`;
+    };
+
+    const assets: CouponFrontSvgAssets = {
+      couponFrontManLogoUri: toSvgDataUri(couponFrontManLogoSvg),
+      couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
+    };
 
     const printPages: { svg: string; count: number }[] = [];
     for (
@@ -627,43 +643,29 @@ export class CouponsService {
         pageStart,
         pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
       );
-      const faces: CouponFrontFaceInput[] = await Promise.all(
-        slice.map(async (c, j) => {
-          const code = String(c.code);
-          const points = Number(c.points ?? 0);
-          const qr = await QRCode.toDataURL(code, {
-            margin: 0,
-            width: couponFrontQrPixelSize(),
-          });
-          return {
-            code,
-            points,
-            qrDataUrl: qr,
-            idSuffix: `f${pageStart + j}`,
-          };
-        }),
-      );
-      printPages.push({
-        svg: buildCouponPrintPageSvg(faces, assets),
-        count: faces.length,
-      });
+      const faces: CouponFrontFaceInput[] = [];
+      for (let j = 0; j < slice.length; j++) {
+        const c = slice[j];
+        const code = String(c.code);
+        const points = Number(c.points ?? 0);
+        const qr = await QRCode.toDataURL(code, {
+          margin: 0,
+          width: 520,
+          color: { dark: '#1F2937', light: '#FFFFFF' }, // White background for QR code
+        });
+        faces.push({
+          code,
+          points,
+          qrDataUrl: qr,
+          idSuffix: `f${pageStart + j}`,
+        });
+      }
+      const pageSvg = buildCouponPrintPageSvg(faces, assets);
+      printPages.push({ svg: pageSvg, count: slice.length });
     }
 
     const timeoutMs = puppeteerPdfTimeoutMs();
-    let browser: PuppeteerBrowser;
-    try {
-      browser = await launchPuppeteerForPdf(timeoutMs);
-    } catch (firstErr) {
-      if (isPuppeteerLaunchError(firstErr)) {
-        throw new ServiceUnavailableException(
-          puppeteerUnavailableMessage(
-            firstErr instanceof Error ? firstErr.message : String(firstErr),
-          ),
-        );
-      }
-      throw firstErr;
-    }
-
+    const browser = await launchPuppeteerForPdf(timeoutMs);
     const pdfParts: Uint8Array[] = [];
     try {
       for (const printPage of printPages) {
@@ -715,7 +717,73 @@ export class CouponsService {
         : COUPON_BATCH_PDF_FRONTS_PER_PAGE;
 
     const slice = coupons.slice(index, index + perPage);
-    const assets = loadCouponFrontSvgAssets();
+
+    const readFirstExisting = (paths: string[]) => {
+      for (const p of paths) {
+        try {
+          if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+        } catch {
+          /* try next */
+        }
+      }
+      throw new NotFoundException(
+        `Coupon export assets missing. Tried: ${paths.join(', ')}`,
+      );
+    };
+
+    const backendAssetsDir = resolveBackendSvgAssetsDir();
+    const backendRoot = path.resolve(__dirname, '../../..'); // <repo>/reward-system-backend
+    const repoRoot = path.resolve(backendRoot, '..'); // <repo>
+    const appAssetsDir = path.resolve(
+      repoRoot,
+      'RewardSystem',
+      'RewardSystem',
+      'src',
+      'assets',
+      'svgs',
+      'originals',
+    );
+    const mobileAppAssetsDir = path.resolve(
+      repoRoot,
+      'RewardSystemMobile',
+      'src',
+      'assets',
+      'svgs',
+      'originals',
+    );
+
+    const couponFrontManLogoSvg = readFirstExisting([
+      ...couponBestBondManSvgPaths(),
+      path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
+      path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
+      path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
+    ]);
+
+    const couponPhoneScanSvg = readFirstExisting([
+      path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
+      path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
+      path.join(appAssetsDir, 'coupon_phone_scan.svg'),
+    ]);
+
+    const toSvgDataUri = (svg: string) => {
+      // If the SVG is just a wrapper for a base64 PNG, extract the PNG to avoid double-encoding blur.
+      const pngMatch = svg.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
+      if (pngMatch && pngMatch[1]) {
+        return `data:image/png;base64,${pngMatch[1]}`;
+      }
+
+      const cleaned = svg
+        .replace(/<\?xml[\s\S]*?\?>/g, '')
+        .replace(/<!DOCTYPE[\s\S]*?>/g, '')
+        .trim();
+      const b64 = Buffer.from(cleaned, 'utf8').toString('base64');
+      return `data:image/svg+xml;base64,${b64}`;
+    };
+
+    const assets: CouponFrontSvgAssets = {
+      couponFrontManLogoUri: toSvgDataUri(couponFrontManLogoSvg),
+      couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
+    };
 
     const blocks: string[] = [];
     for (let i = 0; i < slice.length; i++) {
@@ -724,7 +792,8 @@ export class CouponsService {
       const points = Number(c.points ?? 0);
       const qr = await QRCode.toDataURL(code, {
         margin: 0,
-        width: couponFrontQrPixelSize(),
+        width: 520,
+        color: { dark: '#1F2937', light: '#FFFFFF' },
       });
       const idSuffix = `pv${index + i}`;
       blocks.push(
@@ -739,9 +808,9 @@ export class CouponsService {
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <style>
-            body { margin: 0; padding: 24px; background: #F3F4F6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
-            .preview-stack { display: block; max-width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; margin: 0 auto; line-height: 0; font-size: 0; }
-            .face { display: block; width: ${COUPON_W_MM * COUPON_PREVIEW_PX_PER_MM}px; height: ${COUPON_H_MM * COUPON_PREVIEW_PX_PER_MM}px; margin: 0; border-radius: 0 !important; overflow: hidden; background: #fff; }
+            body { margin: 0; padding: 24px; background: #151515; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+            .preview-stack { display: flex; flex-direction: column; gap: 28px; align-items: center; max-width: 660px; margin: 0 auto; }
+            .face { width: 660px; height: 245px; border-radius: 26px; overflow: hidden; background: #fff; }
           </style>
         </head>
         <body>
