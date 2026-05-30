@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request } from 'express';
 import type { Response } from 'express';
+import * as fs from 'fs';
 import type { AuthUser } from '../auth/auth-user';
 import { RequirePermissions } from '../auth/require-permissions.decorator';
 import { CouponsService } from './coupons.service';
@@ -108,6 +109,44 @@ export class CouponsController {
       `inline; filename=\"coupon-batch-${batchId}.pdf\"`,
     );
     res.status(200).send(pdf);
+  }
+
+  /** Start background export for large batches (returns ZIP of PDF volumes). */
+  @Post('batches/:batchId/export/async')
+  @RequirePermissions('coupons.manage')
+  startAsyncExport(@Param('batchId') batchId: string) {
+    return this.coupons.startBatchExportJob({ batchId });
+  }
+
+  @Get('batches/:batchId/export/jobs/:jobId')
+  @RequirePermissions('coupons.manage')
+  exportJobStatus(
+    @Param('batchId') batchId: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.coupons.getBatchExportJobStatus({ batchId, jobId });
+  }
+
+  @Get('batches/:batchId/export/jobs/:jobId/download.zip')
+  @RequirePermissions('coupons.manage')
+  downloadExportJob(
+    @Param('batchId') batchId: string,
+    @Param('jobId') jobId: string,
+    @Res() res: Response,
+  ) {
+    const { zipPath } = this.coupons.getBatchExportJobDownload({
+      batchId,
+      jobId,
+    });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=\"coupon-batch-${batchId}.zip\"`,
+    );
+    res.status(200);
+    const stream = fs.createReadStream(zipPath);
+    stream.pipe(res);
   }
 
   /** HTML preview with transparent gaps on a dark canvas (matches print layout). */

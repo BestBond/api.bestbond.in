@@ -29,6 +29,18 @@ import {
   couponFrontsPerPrintPage,
   couponPrintPageHeightMm,
 } from './coupon-print-spec';
+import archiver from 'archiver';
+import { createWriteStream } from 'fs';
+import {
+  couponExportJobToStatus,
+  couponExportSyncMax,
+  couponExportVolumeSize,
+  createCouponExportJob,
+  getCouponExportJob,
+  getCouponExportJobForBatch,
+  updateCouponExportJob,
+  type CouponExportJob,
+} from './coupon-export-jobs';
 
 /**
  * Coupon design SVGs live under `src/frontend_assets/svgs` and are not copied to `dist/`.
@@ -363,6 +375,187 @@ async function htmlToCouponPdfBuffer(
   return { buffer, page };
 }
 
+type CouponPdfRow = Pick<Coupon, 'code' | 'points'>;
+
+function readFirstExistingSvg(paths: string[]): string {
+  for (const p of paths) {
+    try {
+      if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+    } catch {
+      /* try next */
+    }
+  }
+  throw new NotFoundException(
+    `Coupon export assets missing. Tried: ${paths.join(', ')}`,
+  );
+}
+
+function loadCouponExportAssets(): CouponFrontSvgAssets {
+  const backendAssetsDir = resolveBackendSvgAssetsDir();
+  const backendRoot = path.resolve(__dirname, '../../..');
+  const repoRoot = path.resolve(backendRoot, '..');
+  const appAssetsDir = path.resolve(
+    repoRoot,
+    'RewardSystem',
+    'RewardSystem',
+    'src',
+    'assets',
+    'svgs',
+    'originals',
+  );
+  const mobileAppAssetsDir = path.resolve(
+    repoRoot,
+    'RewardSystemMobile',
+    'src',
+    'assets',
+    'svgs',
+    'originals',
+  );
+
+  const couponFrontManLogoSvg = readFirstExistingSvg([
+    ...couponBestBondManSvgPaths(),
+    path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
+    path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
+    path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
+  ]);
+
+  const couponPhoneScanSvg = readFirstExistingSvg([
+    path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
+    path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
+    path.join(appAssetsDir, 'coupon_phone_scan.svg'),
+  ]);
+
+  const toSvgDataUri = (svg: string) => {
+    const pngMatch = svg.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
+    if (pngMatch && pngMatch[1]) {
+      return `data:image/png;base64,${pngMatch[1]}`;
+    }
+    const cleaned = svg
+      .replace(/<\?xml[\s\S]*?\?>/g, '')
+      .replace(/<!DOCTYPE[\s\S]*?>/g, '')
+      .trim();
+    const b64 = Buffer.from(cleaned, 'utf8').toString('base64');
+    return `data:image/svg+xml;base64,${b64}`;
+  };
+
+  return {
+    couponFrontManLogoUri: toSvgDataUri(couponFrontManLogoSvg),
+    couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
+  };
+}
+
+async function buildFacesForCouponSlice(
+  slice: CouponPdfRow[],
+  globalOffset: number,
+  idPrefix: string,
+): Promise<CouponFrontFaceInput[]> {
+  const qrCodes = await Promise.all(
+    slice.map((c) =>
+      QRCode.toDataURL(String(c.code), {
+        margin: 0,
+        width: 384,
+        color: { dark: '#1F2937', light: '#FFFFFF' },
+      }),
+    ),
+  );
+  return slice.map((c, j) => ({
+    code: String(c.code),
+    points: Number(c.points ?? 0),
+    qrDataUrl: qrCodes[j],
+    idSuffix: `${idPrefix}${globalOffset + j}`,
+  }));
+}
+
+async function renderCouponsToPdfBuffer(
+  coupons: CouponPdfRow[],
+  assets: CouponFrontSvgAssets,
+  idPrefix: string,
+): Promise<Uint8Array> {
+  const browserChunkSize = couponExportBrowserChunkSize();
+  const timeoutMs = puppeteerPdfTimeoutMs();
+  const pdfParts: Uint8Array[] = [];
+
+  for (
+    let chunkStart = 0;
+    chunkStart < coupons.length;
+    chunkStart += browserChunkSize
+  ) {
+    const couponChunk = coupons.slice(
+      chunkStart,
+      chunkStart + browserChunkSize,
+    );
+    const printPages: { svg: string; count: number }[] = [];
+    for (
+      let pageStart = 0;
+      pageStart < couponChunk.length;
+      pageStart += COUPON_BATCH_PDF_FRONTS_PER_PAGE
+    ) {
+      const slice = couponChunk.slice(
+        pageStart,
+        pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
+      );
+      const faces = await buildFacesForCouponSlice(
+        slice,
+        chunkStart + pageStart,
+        idPrefix,
+      );
+      printPages.push({
+        svg: buildCouponPrintPageSvg(faces, assets),
+        count: slice.length,
+      });
+    }
+
+    const browser = await launchPuppeteerForPdf(timeoutMs);
+    let pdfPage: PuppeteerPage | null = null;
+    try {
+      for (const printPage of printPages) {
+        const html = buildCouponBatchPdfHtml(printPage.svg, printPage.count);
+        try {
+          const { buffer, page } = await htmlToCouponPdfBuffer(
+            html,
+            browser,
+            printPage.count,
+            pdfPage,
+          );
+          pdfPage = page;
+          pdfParts.push(buffer);
+        } catch (pdfErr) {
+          if (isPuppeteerCrashError(pdfErr)) {
+            throw new ServiceUnavailableException(
+              'Coupon PDF export ran out of memory. Wait a moment and try again, or export a smaller batch.',
+            );
+          }
+          throw pdfErr;
+        }
+      }
+    } finally {
+      if (pdfPage) await pdfPage.close().catch(() => undefined);
+      await browser.close().catch(() => undefined);
+    }
+  }
+  return mergeCouponPdfBuffers(pdfParts);
+}
+
+async function zipPdfFiles(
+  pdfPaths: string[],
+  zipPath: string,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const output = createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    output.on('close', () => resolve());
+    output.on('error', reject);
+    archive.on('error', reject);
+    archive.pipe(output);
+    for (const filePath of pdfPaths) {
+      archive.file(filePath, { name: path.basename(filePath) });
+    }
+    void archive.finalize();
+  });
+}
+
+const COUPON_PREVIEW_HTML_MAX = 50;
+
 @Injectable()
 export class CouponsService {
   constructor(
@@ -564,249 +757,154 @@ export class CouponsService {
     };
   }
 
+  async countBatchCoupons(batchId: string): Promise<number> {
+    return this.couponsRepo.count({ where: { batchId } });
+  }
+
   async exportBatchPdf(params: { batchId: string }) {
     const batchId = params.batchId.trim();
     if (!batchId) throw new BadRequestException('Invalid batch id');
 
+    const totalCoupons = await this.countBatchCoupons(batchId);
+    if (totalCoupons === 0) throw new NotFoundException('Batch not found');
+
+    const syncMax = couponExportSyncMax();
+    if (totalCoupons > syncMax) {
+      throw new BadRequestException({
+        message: `This batch has ${totalCoupons} coupons. Use async export (ZIP) for batches over ${syncMax}.`,
+        code: 'EXPORT_TOO_LARGE',
+        totalCoupons,
+        syncMax,
+      });
+    }
+
     const coupons = await this.couponsRepo.find({
       where: { batchId },
       order: { createdAt: 'ASC' },
-      take: 50_000,
+      take: syncMax,
     });
-    if (coupons.length === 0) throw new NotFoundException('Batch not found');
+    const assets = loadCouponExportAssets();
+    return renderCouponsToPdfBuffer(coupons, assets, 'f');
+  }
 
-    const readFirstExisting = (paths: string[]) => {
-      for (const p of paths) {
-        try {
-          if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
-        } catch {
-          /* try next */
-        }
-      }
-      throw new NotFoundException(
-        `Coupon export assets missing. Tried: ${paths.join(', ')}`,
-      );
-    };
+  async startBatchExportJob(params: { batchId: string }) {
+    const batchId = params.batchId.trim();
+    if (!batchId) throw new BadRequestException('Invalid batch id');
 
-    // Prefer backend-hosted design assets; fall back to app assets if needed.
-    const backendAssetsDir = resolveBackendSvgAssetsDir();
-    const backendRoot = path.resolve(__dirname, '../../..'); // <repo>/reward-system-backend
-    const repoRoot = path.resolve(backendRoot, '..'); // <repo>
-    const appAssetsDir = path.resolve(
-      repoRoot,
-      'RewardSystem',
-      'RewardSystem',
-      'src',
-      'assets',
-      'svgs',
-      'originals',
-    );
-    const mobileAppAssetsDir = path.resolve(
-      repoRoot,
-      'RewardSystemMobile',
-      'src',
-      'assets',
-      'svgs',
-      'originals',
-    );
+    const totalCoupons = await this.countBatchCoupons(batchId);
+    if (totalCoupons === 0) throw new NotFoundException('Batch not found');
 
-    const couponFrontManLogoSvg = readFirstExisting([
-      ...couponBestBondManSvgPaths(),
-      path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
-      path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
-      path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
-    ]);
+    const job = createCouponExportJob({ batchId, totalCoupons });
+    if (job.status === 'queued') {
+      void this.runBatchExportJob(job.id);
+    }
+    return couponExportJobToStatus(job);
+  }
 
-    const couponPhoneScanSvg = readFirstExisting([
-      path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
-      path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
-      path.join(appAssetsDir, 'coupon_phone_scan.svg'),
-    ]);
+  getBatchExportJobStatus(params: { batchId: string; jobId: string }) {
+    const batchId = params.batchId.trim();
+    const jobId = params.jobId.trim();
+    const job = getCouponExportJobForBatch(batchId, jobId);
+    if (!job) throw new NotFoundException('Export job not found');
+    return couponExportJobToStatus(job);
+  }
 
-    const toSvgDataUri = (svg: string) => {
-      // If the SVG is just a wrapper for a base64 PNG, extract the PNG to avoid double-encoding blur.
-      const pngMatch = svg.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
-      if (pngMatch && pngMatch[1]) {
-        return `data:image/png;base64,${pngMatch[1]}`;
-      }
+  getBatchExportJobDownload(params: {
+    batchId: string;
+    jobId: string;
+  }): { job: CouponExportJob; zipPath: string } {
+    const batchId = params.batchId.trim();
+    const jobId = params.jobId.trim();
+    const job = getCouponExportJobForBatch(batchId, jobId);
+    if (!job) throw new NotFoundException('Export job not found');
+    if (job.status !== 'ready' || !job.zipPath) {
+      throw new BadRequestException('Export is not ready yet');
+    }
+    if (!fs.existsSync(job.zipPath)) {
+      throw new NotFoundException('Export file expired or missing');
+    }
+    return { job, zipPath: job.zipPath };
+  }
 
-      const cleaned = svg
-        .replace(/<\?xml[\s\S]*?\?>/g, '')
-        .replace(/<!DOCTYPE[\s\S]*?>/g, '')
-        .trim();
-      const b64 = Buffer.from(cleaned, 'utf8').toString('base64');
-      return `data:image/svg+xml;base64,${b64}`;
-    };
+  private async runBatchExportJob(jobId: string): Promise<void> {
+    const job = getCouponExportJob(jobId);
+    if (!job) return;
 
-    const assets: CouponFrontSvgAssets = {
-      couponFrontManLogoUri: toSvgDataUri(couponFrontManLogoSvg),
-      couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
-    };
+    updateCouponExportJob(jobId, { status: 'processing' });
+    const volumeSize = couponExportVolumeSize();
+    const pdfPaths: string[] = [];
 
-    const buildFacesForSlice = async (
-      slice: typeof coupons,
-      globalOffset: number,
-      idPrefix: string,
-    ): Promise<CouponFrontFaceInput[]> => {
-      const qrCodes = await Promise.all(
-        slice.map((c) =>
-          QRCode.toDataURL(String(c.code), {
-            margin: 0,
-            width: 384,
-            color: { dark: '#1F2937', light: '#FFFFFF' },
-          }),
-        ),
-      );
-      return slice.map((c, j) => ({
-        code: String(c.code),
-        points: Number(c.points ?? 0),
-        qrDataUrl: qrCodes[j],
-        idSuffix: `${idPrefix}${globalOffset + j}`,
-      }));
-    };
+    try {
+      const assets = loadCouponExportAssets();
 
-    const browserChunkSize = couponExportBrowserChunkSize();
-    const timeoutMs = puppeteerPdfTimeoutMs();
-    const pdfParts: Uint8Array[] = [];
+      for (let vol = 0; vol < job.volumeCount; vol++) {
+        const offset = vol * volumeSize;
+        const coupons = await this.couponsRepo.find({
+          where: { batchId: job.batchId },
+          order: { createdAt: 'ASC' },
+          take: volumeSize,
+          skip: offset,
+        });
+        if (coupons.length === 0) break;
 
-    for (
-      let chunkStart = 0;
-      chunkStart < coupons.length;
-      chunkStart += browserChunkSize
-    ) {
-      const couponChunk = coupons.slice(
-        chunkStart,
-        chunkStart + browserChunkSize,
-      );
-      const printPages: { svg: string; count: number }[] = [];
-      for (
-        let pageStart = 0;
-        pageStart < couponChunk.length;
-        pageStart += COUPON_BATCH_PDF_FRONTS_PER_PAGE
-      ) {
-        const slice = couponChunk.slice(
-          pageStart,
-          pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
+        const pdfBuffer = await renderCouponsToPdfBuffer(
+          coupons,
+          assets,
+          `v${vol}_`,
         );
-        const faces = await buildFacesForSlice(
-          slice,
-          chunkStart + pageStart,
-          'f',
-        );
-        printPages.push({
-          svg: buildCouponPrintPageSvg(faces, assets),
-          count: slice.length,
+        const partName = `coupons-${String(vol + 1).padStart(3, '0')}-of-${String(job.volumeCount).padStart(3, '0')}.pdf`;
+        const partPath = path.join(job.workDir, partName);
+        fs.writeFileSync(partPath, pdfBuffer);
+        pdfPaths.push(partPath);
+
+        updateCouponExportJob(jobId, {
+          processedCoupons: Math.min(
+            offset + coupons.length,
+            job.totalCoupons,
+          ),
+          processedVolumes: vol + 1,
         });
       }
 
-      const browser = await launchPuppeteerForPdf(timeoutMs);
-      let pdfPage: PuppeteerPage | null = null;
-      try {
-        for (const printPage of printPages) {
-          const html = buildCouponBatchPdfHtml(printPage.svg, printPage.count);
-          try {
-            const { buffer, page } = await htmlToCouponPdfBuffer(
-              html,
-              browser,
-              printPage.count,
-              pdfPage,
-            );
-            pdfPage = page;
-            pdfParts.push(buffer);
-          } catch (pdfErr) {
-            if (isPuppeteerCrashError(pdfErr)) {
-              throw new ServiceUnavailableException(
-                'Coupon PDF export ran out of memory. Wait a moment and try again, or export a smaller batch.',
-              );
-            }
-            throw pdfErr;
-          }
-        }
-      } finally {
-        if (pdfPage) await pdfPage.close().catch(() => undefined);
-        await browser.close().catch(() => undefined);
-      }
+      const zipPath = path.join(
+        job.workDir,
+        `coupon-batch-${job.batchId}.zip`,
+      );
+      await zipPdfFiles(pdfPaths, zipPath);
+
+      updateCouponExportJob(jobId, {
+        status: 'ready',
+        zipPath,
+        completedAt: new Date(),
+        processedCoupons: job.totalCoupons,
+        processedVolumes: job.volumeCount,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : String(err ?? 'Export failed');
+      updateCouponExportJob(jobId, {
+        status: 'failed',
+        error: msg,
+        completedAt: new Date(),
+      });
     }
-    return mergeCouponPdfBuffers(pdfParts);
   }
 
   async exportBatchPreviewHtml(params: { batchId: string }) {
     const batchId = params.batchId.trim();
     if (!batchId) throw new BadRequestException('Invalid batch id');
 
+    const totalCoupons = await this.countBatchCoupons(batchId);
+    if (totalCoupons === 0) throw new NotFoundException('Batch not found');
+
+    const previewCount = Math.min(totalCoupons, COUPON_PREVIEW_HTML_MAX);
     const coupons = await this.couponsRepo.find({
       where: { batchId },
       order: { createdAt: 'ASC' },
-      take: 50_000,
+      take: previewCount,
     });
-    if (coupons.length === 0) throw new NotFoundException('Batch not found');
 
-    const readFirstExisting = (paths: string[]) => {
-      for (const p of paths) {
-        try {
-          if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
-        } catch {
-          /* try next */
-        }
-      }
-      throw new NotFoundException(
-        `Coupon export assets missing. Tried: ${paths.join(', ')}`,
-      );
-    };
-
-    const backendAssetsDir = resolveBackendSvgAssetsDir();
-    const backendRoot = path.resolve(__dirname, '../../..');
-    const repoRoot = path.resolve(backendRoot, '..');
-    const appAssetsDir = path.resolve(
-      repoRoot,
-      'RewardSystem',
-      'RewardSystem',
-      'src',
-      'assets',
-      'svgs',
-      'originals',
-    );
-    const mobileAppAssetsDir = path.resolve(
-      repoRoot,
-      'RewardSystemMobile',
-      'src',
-      'assets',
-      'svgs',
-      'originals',
-    );
-
-    const couponFrontManLogoSvg = readFirstExisting([
-      ...couponBestBondManSvgPaths(),
-      path.join(backendAssetsDir, 'coupon_front_man_logo.svg'),
-      path.join(mobileAppAssetsDir, 'coupon_front_man_logo.svg'),
-      path.join(appAssetsDir, 'coupon_front_man_logo.svg'),
-    ]);
-
-    const couponPhoneScanSvg = readFirstExisting([
-      path.join(backendAssetsDir, 'coupon_phone_scan.svg'),
-      path.join(mobileAppAssetsDir, 'coupon_phone_scan.svg'),
-      path.join(appAssetsDir, 'coupon_phone_scan.svg'),
-    ]);
-
-    const toSvgDataUri = (svg: string) => {
-      const pngMatch = svg.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
-      if (pngMatch && pngMatch[1]) {
-        return `data:image/png;base64,${pngMatch[1]}`;
-      }
-
-      const cleaned = svg
-        .replace(/<\?xml[\s\S]*?\?>/g, '')
-        .replace(/<!DOCTYPE[\s\S]*?>/g, '')
-        .trim();
-      const b64 = Buffer.from(cleaned, 'utf8').toString('base64');
-      return `data:image/svg+xml;base64,${b64}`;
-    };
-
-    const assets: CouponFrontSvgAssets = {
-      couponFrontManLogoUri: toSvgDataUri(couponFrontManLogoSvg),
-      couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
-    };
-
+    const assets = loadCouponExportAssets();
     const pageBlocks: string[] = [];
     for (
       let pageStart = 0;
@@ -817,27 +915,20 @@ export class CouponsService {
         pageStart,
         pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
       );
-      const faces: CouponFrontFaceInput[] = [];
-      for (let j = 0; j < slice.length; j++) {
-        const c = slice[j];
-        const code = String(c.code);
-        const points = Number(c.points ?? 0);
-        const qr = await QRCode.toDataURL(code, {
-          margin: 0,
-          width: 520,
-          color: { dark: '#1F2937', light: '#FFFFFF' },
-        });
-        faces.push({
-          code,
-          points,
-          qrDataUrl: qr,
-          idSuffix: `pv${pageStart + j}`,
-        });
-      }
+      const faces = await buildFacesForCouponSlice(
+        slice,
+        pageStart,
+        'pv',
+      );
       pageBlocks.push(
         `<div class="print-page">${buildCouponPrintPageSvg(faces, assets)}</div>`,
       );
     }
+
+    const previewNote =
+      totalCoupons > previewCount
+        ? `<p class="preview-note">Showing first ${previewCount} of ${totalCoupons.toLocaleString()} coupons. Download exports the full batch.</p>`
+        : '';
 
     return `<!doctype html>
 <html>
@@ -851,6 +942,15 @@ export class CouponsService {
         padding: 24px;
         background: #151515;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      }
+      .preview-note {
+        color: #fbbf24;
+        text-align: center;
+        font-size: 14px;
+        margin-bottom: 24px;
+        max-width: 520px;
+        margin-left: auto;
+        margin-right: auto;
       }
       .preview-stack {
         display: flex;
@@ -873,6 +973,7 @@ export class CouponsService {
     </style>
   </head>
   <body>
+    ${previewNote}
     <div class="preview-stack">
       ${pageBlocks.join('\n')}
     </div>
