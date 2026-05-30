@@ -227,12 +227,10 @@ export function buildCouponFaceMarkup(params: {
         ${scanGraphic}
         <image href="${qr}" x="${L.qrX}" y="${L.qrY}" width="${L.qrSize}" height="${L.qrSize}" preserveAspectRatio="xMidYMid meet" />
         
-        <!-- ID label with decorative lines -->
-        <line x1="${Math.round(40 * sx)}" y1="${L.idY - Math.round(5 * sy)}" x2="${Math.round(55 * sx)}" y2="${L.idY - Math.round(5 * sy)}" stroke="#000" stroke-width="${1 * sx}" stroke-linecap="round" />
+        <!-- ID label -->
         <text x="${Math.round(L.LEFT_W / 2)}" y="${L.idY}" text-anchor="middle"
           font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
           font-size="${L.idFontSize}" font-weight="400" fill="#000">ID: ${code}</text>
-        <line x1="${Math.round(165 * sx)}" y1="${L.idY - Math.round(5 * sy)}" x2="${Math.round(180 * sx)}" y2="${L.idY - Math.round(5 * sy)}" stroke="#000" stroke-width="${1 * sx}" stroke-linecap="round" />
 
         <!-- Right Content -->
         ${logoGraphic}
