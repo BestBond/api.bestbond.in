@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -38,7 +39,9 @@ import {
   createCouponExportJob,
   getCouponExportJob,
   getCouponExportJobForBatch,
+  listIncompleteJobs,
   updateCouponExportJob,
+  volumePartName,
   type CouponExportJob,
 } from './coupon-export-jobs';
 
@@ -122,7 +125,7 @@ function couponExportBrowserChunkSize(): number {
     const n = parseInt(raw, 10);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  return 35;
+  return 25;
 }
 
 const COUPON_POINT_PALETTES = [
@@ -542,7 +545,7 @@ async function zipPdfFiles(
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const output = createWriteStream(zipPath);
-    const archive = archiver('zip', { zlib: { level: 6 } });
+    const archive = archiver('zip', { zlib: { level: 1 } });
     output.on('close', () => resolve());
     output.on('error', reject);
     archive.on('error', reject);
@@ -555,15 +558,22 @@ async function zipPdfFiles(
 }
 
 const COUPON_PREVIEW_HTML_MAX = 50;
+const runningExportJobs = new Set<string>();
 
 @Injectable()
-export class CouponsService {
+export class CouponsService implements OnModuleInit {
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Coupon) private readonly couponsRepo: Repository<Coupon>,
     @InjectRepository(User) private readonly usersRepo: Repository<User>,
     private readonly points: PointsService,
   ) {}
+
+  onModuleInit(): void {
+    for (const job of listIncompleteJobs()) {
+      void this.runBatchExportJob(job.id);
+    }
+  }
 
   async generate(params: {
     createdByUserId: string;
@@ -795,7 +805,12 @@ export class CouponsService {
     if (totalCoupons === 0) throw new NotFoundException('Batch not found');
 
     const job = createCouponExportJob({ batchId, totalCoupons });
-    if (job.status === 'queued') {
+    if (
+      job.status === 'queued' ||
+      job.status === 'processing' ||
+      job.status === 'zipping' ||
+      (job.status === 'failed' && job.processedVolumes > 0)
+    ) {
       void this.runBatchExportJob(job.id);
     }
     return couponExportJobToStatus(job);
@@ -827,10 +842,16 @@ export class CouponsService {
   }
 
   private async runBatchExportJob(jobId: string): Promise<void> {
-    const job = getCouponExportJob(jobId);
-    if (!job) return;
+    if (runningExportJobs.has(jobId)) return;
+    runningExportJobs.add(jobId);
 
-    updateCouponExportJob(jobId, { status: 'processing' });
+    const job = getCouponExportJob(jobId);
+    if (!job) {
+      runningExportJobs.delete(jobId);
+      return;
+    }
+
+    updateCouponExportJob(jobId, { status: 'processing', phase: 'generating' });
     const volumeSize = couponExportVolumeSize();
     const pdfPaths: string[] = [];
 
@@ -838,6 +859,22 @@ export class CouponsService {
       const assets = loadCouponExportAssets();
 
       for (let vol = 0; vol < job.volumeCount; vol++) {
+        const partName = volumePartName(vol, job.volumeCount);
+        const partPath = path.join(job.workDir, partName);
+
+        if (fs.existsSync(partPath) && fs.statSync(partPath).size > 1000) {
+          pdfPaths.push(partPath);
+          const offset = vol * volumeSize;
+          updateCouponExportJob(jobId, {
+            processedCoupons: Math.min(
+              offset + volumeSize,
+              job.totalCoupons,
+            ),
+            processedVolumes: vol + 1,
+          });
+          continue;
+        }
+
         const offset = vol * volumeSize;
         const coupons = await this.couponsRepo.find({
           where: { batchId: job.batchId },
@@ -852,10 +889,13 @@ export class CouponsService {
           assets,
           `v${vol}_`,
         );
-        const partName = `coupons-${String(vol + 1).padStart(3, '0')}-of-${String(job.volumeCount).padStart(3, '0')}.pdf`;
-        const partPath = path.join(job.workDir, partName);
         fs.writeFileSync(partPath, pdfBuffer);
-        pdfPaths.push(partPath);
+        pdfPaths.length = 0;
+        for (let i = 0; i <= vol; i++) {
+          pdfPaths.push(
+            path.join(job.workDir, volumePartName(i, job.volumeCount)),
+          );
+        }
 
         updateCouponExportJob(jobId, {
           processedCoupons: Math.min(
@@ -866,14 +906,20 @@ export class CouponsService {
         });
       }
 
+      updateCouponExportJob(jobId, { status: 'zipping', phase: 'zipping' });
+
       const zipPath = path.join(
         job.workDir,
         `coupon-batch-${job.batchId}.zip`,
       );
-      await zipPdfFiles(pdfPaths, zipPath);
+      const allParts = Array.from({ length: job.volumeCount }, (_, i) =>
+        path.join(job.workDir, volumePartName(i, job.volumeCount)),
+      ).filter((p) => fs.existsSync(p));
+      await zipPdfFiles(allParts, zipPath);
 
       updateCouponExportJob(jobId, {
         status: 'ready',
+        phase: 'ready',
         zipPath,
         completedAt: new Date(),
         processedCoupons: job.totalCoupons,
@@ -884,9 +930,12 @@ export class CouponsService {
         err instanceof Error ? err.message : String(err ?? 'Export failed');
       updateCouponExportJob(jobId, {
         status: 'failed',
+        phase: 'failed',
         error: msg,
         completedAt: new Date(),
       });
+    } finally {
+      runningExportJobs.delete(jobId);
     }
   }
 
