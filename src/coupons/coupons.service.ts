@@ -18,7 +18,6 @@ import QRCode from 'qrcode';
 import puppeteer from 'puppeteer';
 import { PDFDocument } from 'pdf-lib';
 import {
-  buildCouponFrontSvg,
   buildCouponPrintPageSvg,
   couponFrontQrPixelSize,
   type CouponFrontFaceInput,
@@ -101,14 +100,8 @@ function wrapSvgWithBackground(params: {
   `.trim();
 }
 
-/** Reference coupon sheet exported from the supplied design. */
-const COUPON_BATCH_PDF_PAGE_WIDTH_PT = 1072;
-const COUPON_BATCH_PDF_PAGE_HEIGHT_PT = 2800;
-const COUPON_BATCH_PDF_TOP_PADDING_PT = 250;
-const COUPON_BATCH_PDF_GAP_PT = 166;
-
 /** Front-only coupon faces per exported page. */
-const COUPON_BATCH_PDF_FRONTS_PER_PAGE = 6;
+const COUPON_BATCH_PDF_FRONTS_PER_PAGE = couponFrontsPerA4Page();
 
 /** Chunk size for PDF merging to avoid Puppeteer OOM. */
 function couponExportPdfChunkSize(): number {
@@ -153,21 +146,37 @@ function buildCouponBatchPdfHtml(
   <head>
     <meta charset="utf-8" />
     <style>
-      @page { size: ${COUPON_BATCH_PDF_PAGE_WIDTH_PT}pt ${COUPON_BATCH_PDF_PAGE_HEIGHT_PT}pt; margin: 0; }
-      body { margin: 0; background: #151515; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
-      .page {
-        page-break-after: always;
-        display: flex;
-        flex-direction: column;
-        box-sizing: border-box;
-        width: ${COUPON_BATCH_PDF_PAGE_WIDTH_PT}pt;
-        min-height: ${COUPON_BATCH_PDF_PAGE_HEIGHT_PT}pt;
-        padding-top: ${COUPON_BATCH_PDF_TOP_PADDING_PT}pt;
-        gap: ${COUPON_BATCH_PDF_GAP_PT}pt;
-        align-items: center;
-        background: #151515;
+      @page {
+        size: ${COUPON_W_MM}mm ${pageH}mm;
+        margin: 0;
+        background: transparent;
       }
-      .face { display: block; border-radius: 16pt; overflow: hidden; flex-shrink: 0; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: ${COUPON_W_MM}mm;
+        height: ${pageH}mm;
+        overflow: hidden;
+        background: transparent;
+      }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+      .page {
+        display: block;
+        width: ${COUPON_W_MM}mm;
+        height: ${pageH}mm;
+        line-height: 0;
+        font-size: 0;
+        overflow: hidden;
+        border-radius: 0 !important;
+        background: transparent;
+      }
+      .page > svg {
+        display: block;
+        width: ${COUPON_W_MM}mm;
+        height: ${pageH}mm;
+        border-radius: 0 !important;
+      }
     </style>
   </head>
   <body>
@@ -337,6 +346,7 @@ async function htmlToCouponPdfBuffer(
   const page = await browser.newPage();
   try {
     page.setDefaultTimeout(timeoutMs);
+    await page.emulateMediaType('screen');
     await page.setContent(html, {
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
@@ -345,7 +355,8 @@ async function htmlToCouponPdfBuffer(
       width: `${COUPON_W_MM}mm`,
       height: `${pageH}mm`,
       printBackground: true,
-      preferCSSPageSize: true,
+      omitBackground: true,
+      preferCSSPageSize: false,
       margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
     });
   } finally {
@@ -689,11 +700,7 @@ export class CouponsService {
     return mergeCouponPdfBuffers(pdfParts);
   }
 
-  async exportBatchPreviewHtml(params: {
-    batchId: string;
-    index?: number;
-    perPage?: number;
-  }) {
+  async exportBatchPreviewHtml(params: { batchId: string }) {
     const batchId = params.batchId.trim();
     if (!batchId) throw new BadRequestException('Invalid batch id');
 
@@ -703,20 +710,6 @@ export class CouponsService {
       take: 50_000,
     });
     if (coupons.length === 0) throw new NotFoundException('Batch not found');
-
-    const index =
-      params.index != null && Number.isFinite(params.index)
-        ? Math.max(0, Math.floor(params.index))
-        : 0;
-    const perPage =
-      params.perPage != null && Number.isFinite(params.perPage)
-        ? Math.max(
-            1,
-            Math.min(COUPON_BATCH_PDF_FRONTS_PER_PAGE, Math.floor(params.perPage)),
-          )
-        : COUPON_BATCH_PDF_FRONTS_PER_PAGE;
-
-    const slice = coupons.slice(index, index + perPage);
 
     const readFirstExisting = (paths: string[]) => {
       for (const p of paths) {
@@ -732,8 +725,8 @@ export class CouponsService {
     };
 
     const backendAssetsDir = resolveBackendSvgAssetsDir();
-    const backendRoot = path.resolve(__dirname, '../../..'); // <repo>/reward-system-backend
-    const repoRoot = path.resolve(backendRoot, '..'); // <repo>
+    const backendRoot = path.resolve(__dirname, '../../..');
+    const repoRoot = path.resolve(backendRoot, '..');
     const appAssetsDir = path.resolve(
       repoRoot,
       'RewardSystem',
@@ -766,7 +759,6 @@ export class CouponsService {
     ]);
 
     const toSvgDataUri = (svg: string) => {
-      // If the SVG is just a wrapper for a base64 PNG, extract the PNG to avoid double-encoding blur.
       const pngMatch = svg.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
       if (pngMatch && pngMatch[1]) {
         return `data:image/png;base64,${pngMatch[1]}`;
@@ -785,41 +777,77 @@ export class CouponsService {
       couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
     };
 
-    const blocks: string[] = [];
-    for (let i = 0; i < slice.length; i++) {
-      const c = slice[i];
-      const code = String(c.code);
-      const points = Number(c.points ?? 0);
-      const qr = await QRCode.toDataURL(code, {
-        margin: 0,
-        width: 520,
-        color: { dark: '#1F2937', light: '#FFFFFF' },
-      });
-      const idSuffix = `pv${index + i}`;
-      blocks.push(
-        `<div class="face">${buildCouponFrontSvg({ code, points, qrDataUrl: qr, idSuffix, assets })}</div>`,
+    const pageBlocks: string[] = [];
+    for (
+      let pageStart = 0;
+      pageStart < coupons.length;
+      pageStart += COUPON_BATCH_PDF_FRONTS_PER_PAGE
+    ) {
+      const slice = coupons.slice(
+        pageStart,
+        pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
+      );
+      const faces: CouponFrontFaceInput[] = [];
+      for (let j = 0; j < slice.length; j++) {
+        const c = slice[j];
+        const code = String(c.code);
+        const points = Number(c.points ?? 0);
+        const qr = await QRCode.toDataURL(code, {
+          margin: 0,
+          width: 520,
+          color: { dark: '#1F2937', light: '#FFFFFF' },
+        });
+        faces.push({
+          code,
+          points,
+          qrDataUrl: qr,
+          idSuffix: `pv${pageStart + j}`,
+        });
+      }
+      pageBlocks.push(
+        `<div class="print-page">${buildCouponPrintPageSvg(faces, assets)}</div>`,
       );
     }
 
-    return `
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <style>
-            body { margin: 0; padding: 24px; background: #151515; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
-            .preview-stack { display: flex; flex-direction: column; gap: 28px; align-items: center; max-width: 660px; margin: 0 auto; }
-            .face { width: 660px; height: 245px; border-radius: 26px; overflow: hidden; background: #fff; }
-          </style>
-        </head>
-        <body>
-          <div class="preview-stack">
-          ${blocks.join('')}
-          </div>
-        </body>
-      </html>
-    `;
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #151515;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      }
+      .preview-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+        align-items: center;
+        margin: 0 auto;
+      }
+      .print-page {
+        display: block;
+        line-height: 0;
+        font-size: 0;
+        background: transparent;
+      }
+      .print-page > svg {
+        display: block;
+        max-width: min(101mm, 100%);
+        height: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-stack">
+      ${pageBlocks.join('\n')}
+    </div>
+  </body>
+</html>`;
   }
 
   async redeem(params: { userId: string; userRoles: string[]; code: string }) {

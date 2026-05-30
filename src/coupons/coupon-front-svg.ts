@@ -283,7 +283,8 @@ export function buildCouponPrintPageSvg(
 
   return `
     <svg viewBox="0 0 ${COUPON_DESIGN_W} ${pageViewBoxH}" width="${COUPON_W_MM}mm" height="${pageMmH}mm"
-      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" shape-rendering="crispEdges">
+      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" shape-rendering="crispEdges"
+      style="background-color: transparent">
       <defs>
         <symbol id="${COUPON_ASSET_SCAN_ID}" viewBox="0 0 132 133">
           <image width="132" height="133" href="${assets.couponPhoneScanUri}" preserveAspectRatio="xMidYMid meet" />

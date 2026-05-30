@@ -109,4 +109,17 @@ export class CouponsController {
     );
     res.status(200).send(pdf);
   }
+
+  /** HTML preview with transparent gaps on a dark canvas (matches print layout). */
+  @Get('batches/:batchId/preview.html')
+  @RequirePermissions('coupons.manage')
+  async exportBatchPreviewHtml(
+    @Param('batchId') batchId: string,
+    @Res() res: Response,
+  ) {
+    const html = await this.coupons.exportBatchPreviewHtml({ batchId });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.status(200).send(html);
+  }
 }
