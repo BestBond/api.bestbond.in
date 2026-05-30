@@ -200,7 +200,7 @@ export function buildCouponFaceMarkup(params: {
   return `
       <defs>
         <clipPath id="c_${sid}">
-          <rect x="0" y="0" width="${COUPON_DESIGN_W}" height="${COUPON_DESIGN_H}" rx="${Math.round(26 * sx)}" ry="${Math.round(26 * sy)}" />
+          <rect x="0" y="0" width="${COUPON_DESIGN_W}" height="${COUPON_DESIGN_H}" />
         </clipPath>
         <linearGradient id="g_${sid}" x1="${L.RIGHT_X}" y1="0" x2="${COUPON_DESIGN_W}" y2="${COUPON_DESIGN_H}" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="#F97316"/>

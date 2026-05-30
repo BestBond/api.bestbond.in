@@ -3,7 +3,7 @@ export const COUPON_W_MM = 101;
 export const COUPON_H_MM = 38;
 
 /** Vertical gap between coupons in the PDF (mm). */
-export const COUPON_V_GAP_MM = 5;
+export const COUPON_V_GAP_MM = 1;
 
 /** Keep artwork inside this inset so die-cutting does not clip content. */
 export const COUPON_SAFE_INSET_MM = 5;
