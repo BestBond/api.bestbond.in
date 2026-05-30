@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import type { AuthUser } from '../auth/auth-user';
+import { Public } from '../auth/public.decorator';
 import { RequirePermissions } from '../auth/require-permissions.decorator';
 import { CouponsService } from './coupons.service';
 import { GenerateCouponsDto } from './dto/generate-coupons.dto';
@@ -136,6 +137,33 @@ export class CouponsController {
     return this.coupons.getBatchExportJobStatus({ batchId, jobId });
   }
 
+  @Get('batches/:batchId/export/jobs/:jobId/download-link')
+  @RequirePermissions('coupons.manage')
+  exportJobDownloadLink(
+    @Param('batchId') batchId: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.coupons.getBatchExportDownloadLink({ batchId, jobId });
+  }
+
+  /** Tokenized download — browser streams large ZIPs directly to disk (no JWT header needed). */
+  @Public()
+  @Get('export/files/:token')
+  downloadExportFile(@Param('token') token: string, @Res() res: Response) {
+    const cleanToken = token.replace(/\.zip$/i, '');
+    const { batchId, zipPath, fileSizeBytes } =
+      this.coupons.getBatchExportJobDownloadByToken(cleanToken);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Length', String(fileSizeBytes));
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=\"coupon-batch-${batchId}.zip\"`,
+    );
+    res.status(200);
+    fs.createReadStream(zipPath).pipe(res);
+  }
+
   @Get('batches/:batchId/export/jobs/:jobId/download.zip')
   @RequirePermissions('coupons.manage')
   downloadExportJob(
@@ -147,15 +175,16 @@ export class CouponsController {
       batchId,
       jobId,
     });
+    const fileSizeBytes = fs.statSync(zipPath).size;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Length', String(fileSizeBytes));
     res.setHeader(
       'Content-Disposition',
       `attachment; filename=\"coupon-batch-${batchId}.zip\"`,
     );
     res.status(200);
-    const stream = fs.createReadStream(zipPath);
-    stream.pipe(res);
+    fs.createReadStream(zipPath).pipe(res);
   }
 
   /** HTML preview with transparent gaps on a dark canvas (matches print layout). */

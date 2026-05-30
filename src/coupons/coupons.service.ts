@@ -40,7 +40,9 @@ import {
   createCouponExportJob,
   getCouponExportJob,
   getCouponExportJobForBatch,
+  issueExportDownloadToken,
   listIncompleteJobs,
+  resolveExportDownloadToken,
   updateCouponExportJob,
   volumePartName,
   type CouponExportJob,
@@ -893,6 +895,32 @@ export class CouponsService implements OnModuleInit {
       throw new NotFoundException('Export file expired or missing');
     }
     return { job, zipPath: job.zipPath };
+  }
+
+  getBatchExportDownloadLink(params: { batchId: string; jobId: string }) {
+    const { job, zipPath } = this.getBatchExportJobDownload(params);
+    const fileSizeBytes = fs.statSync(zipPath).size;
+    const token = issueExportDownloadToken(job.batchId, job.id);
+    return {
+      path: `/coupons/export/files/${token}.zip`,
+      fileSizeBytes,
+      expiresInSeconds: 30 * 60,
+    };
+  }
+
+  getBatchExportJobDownloadByToken(token: string): {
+    batchId: string;
+    zipPath: string;
+    fileSizeBytes: number;
+  } {
+    const ref = resolveExportDownloadToken(token);
+    if (!ref) throw new NotFoundException('Download link expired or invalid');
+    const { zipPath } = this.getBatchExportJobDownload(ref);
+    return {
+      batchId: ref.batchId,
+      zipPath,
+      fileSizeBytes: fs.statSync(zipPath).size,
+    };
   }
 
   private async runBatchExportJob(jobId: string): Promise<void> {

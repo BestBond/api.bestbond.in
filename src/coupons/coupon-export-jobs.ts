@@ -270,6 +270,16 @@ export function couponExportJobToStatus(job: CouponExportJob) {
           Math.round((job.processedCoupons / job.totalCoupons) * 100),
         )
       : 0;
+
+  let fileSizeBytes: number | null = null;
+  if (job.status === 'ready' && job.zipPath && fs.existsSync(job.zipPath)) {
+    try {
+      fileSizeBytes = fs.statSync(job.zipPath).size;
+    } catch {
+      fileSizeBytes = null;
+    }
+  }
+
   return {
     jobId: job.id,
     batchId: job.batchId,
@@ -280,12 +290,44 @@ export function couponExportJobToStatus(job: CouponExportJob) {
     volumeCount: job.volumeCount,
     processedVolumes: job.processedVolumes,
     progressPct,
+    fileSizeBytes,
     error: job.error ?? null,
     ready: job.status === 'ready',
     failed: job.status === 'failed',
     createdAt: job.createdAt.toISOString(),
     completedAt: job.completedAt?.toISOString() ?? null,
   };
+}
+
+const exportDownloadTokens = new Map<
+  string,
+  { batchId: string; jobId: string; expiresAt: number }
+>();
+
+/** Short-lived token so the browser can stream large ZIPs without loading into memory. */
+export function issueExportDownloadToken(
+  batchId: string,
+  jobId: string,
+): string {
+  const token = randomUUID();
+  exportDownloadTokens.set(token, {
+    batchId,
+    jobId,
+    expiresAt: Date.now() + 30 * 60 * 1000,
+  });
+  return token;
+}
+
+export function resolveExportDownloadToken(
+  token: string,
+): { batchId: string; jobId: string } | null {
+  const entry = exportDownloadTokens.get(token);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    exportDownloadTokens.delete(token);
+    return null;
+  }
+  return { batchId: entry.batchId, jobId: entry.jobId };
 }
 
 export function volumePartName(vol: number, volumeCount: number): string {
