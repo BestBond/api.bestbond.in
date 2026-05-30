@@ -90,6 +90,15 @@ export class CouponsController {
   }
 
   /**
+   * Export routing: total coupon count and whether async ZIP is required.
+   */
+  @Get('batches/:batchId/export/meta')
+  @RequirePermissions('coupons.manage')
+  getBatchExportMeta(@Param('batchId') batchId: string) {
+    return this.coupons.getBatchExportMeta({ batchId });
+  }
+
+  /**
    * Ops Admin/Superadmin: export a coupon batch as print-ready PDF.
    * Print-ready coupons (101×38 mm), stacked vertically with no gap.
    */

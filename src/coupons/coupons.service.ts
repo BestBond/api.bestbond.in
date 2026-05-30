@@ -30,8 +30,9 @@ import {
   couponFrontsPerPrintPage,
   couponPrintPageHeightMm,
 } from './coupon-print-spec';
-import archiver from 'archiver';
 import { createWriteStream } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import {
   couponExportJobToStatus,
   couponExportSyncMax,
@@ -539,13 +540,50 @@ async function renderCouponsToPdfBuffer(
   return mergeCouponPdfBuffers(pdfParts);
 }
 
+async function zipPdfFilesWithCli(
+  pdfPaths: string[],
+  zipPath: string,
+): Promise<void> {
+  const execFileAsync = promisify(execFile);
+  if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+  await execFileAsync('zip', ['-j', '-q', zipPath, ...pdfPaths], {
+    maxBuffer: 256 * 1024 * 1024,
+  });
+}
+
+function createZipArchive(options: { zlib: { level: number } }) {
+  // archiver v8 exports ZipArchive class (not a default callable)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ZipArchive } = require('archiver') as {
+    ZipArchive: new (opts: { zlib: { level: number } }) => {
+      pipe: (dest: NodeJS.WritableStream) => void;
+      file: (filePath: string, opts: { name: string }) => void;
+      finalize: () => Promise<void>;
+      on: (event: string, fn: (err: Error) => void) => void;
+    };
+  };
+  return new ZipArchive(options);
+}
+
 async function zipPdfFiles(
   pdfPaths: string[],
   zipPath: string,
 ): Promise<void> {
+  if (pdfPaths.length === 0) throw new Error('No PDF files to zip');
+  if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
+
+  if (process.platform === 'linux') {
+    try {
+      await zipPdfFilesWithCli(pdfPaths, zipPath);
+      return;
+    } catch {
+      /* fall through to ZipArchive */
+    }
+  }
+
   await new Promise<void>((resolve, reject) => {
     const output = createWriteStream(zipPath);
-    const archive = archiver('zip', { zlib: { level: 1 } });
+    const archive = createZipArchive({ zlib: { level: 1 } });
     output.on('close', () => resolve());
     output.on('error', reject);
     archive.on('error', reject);
@@ -553,7 +591,7 @@ async function zipPdfFiles(
     for (const filePath of pdfPaths) {
       archive.file(filePath, { name: path.basename(filePath) });
     }
-    void archive.finalize();
+    void archive.finalize().catch(reject);
   });
 }
 
@@ -769,6 +807,22 @@ export class CouponsService implements OnModuleInit {
 
   async countBatchCoupons(batchId: string): Promise<number> {
     return this.couponsRepo.count({ where: { batchId } });
+  }
+
+  async getBatchExportMeta(params: { batchId: string }) {
+    const batchId = params.batchId.trim();
+    if (!batchId) throw new BadRequestException('Invalid batch id');
+
+    const totalCoupons = await this.countBatchCoupons(batchId);
+    if (totalCoupons === 0) throw new NotFoundException('Batch not found');
+
+    const syncMax = couponExportSyncMax();
+    return {
+      batchId,
+      totalCoupons,
+      syncMax,
+      useAsyncExport: totalCoupons > syncMax,
+    };
   }
 
   async exportBatchPdf(params: { batchId: string }) {
