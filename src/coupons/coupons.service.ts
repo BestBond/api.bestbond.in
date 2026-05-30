@@ -26,7 +26,7 @@ import {
 import {
   COUPON_H_MM,
   COUPON_W_MM,
-  couponFrontsPerA4Page,
+  couponFrontsPerPrintPage,
   couponPrintPageHeightMm,
 } from './coupon-print-spec';
 
@@ -100,17 +100,17 @@ function wrapSvgWithBackground(params: {
   `.trim();
 }
 
-/** Front-only coupon faces per exported page. */
-const COUPON_BATCH_PDF_FRONTS_PER_PAGE = couponFrontsPerA4Page();
+/** Front-only coupon faces per exported PDF page (custom mm page height). */
+const COUPON_BATCH_PDF_FRONTS_PER_PAGE = couponFrontsPerPrintPage();
 
-/** Chunk size for PDF merging to avoid Puppeteer OOM. */
-function couponExportPdfChunkSize(): number {
+/** Coupons per Puppeteer browser session before restart (limits VPS memory). */
+function couponExportBrowserChunkSize(): number {
   const raw = process.env.COUPON_EXPORT_PDF_CHUNK_SIZE;
   if (raw) {
     const n = parseInt(raw, 10);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  return 50;
+  return 35;
 }
 
 const COUPON_POINT_PALETTES = [
@@ -335,33 +335,32 @@ function isPuppeteerCrashError(err: unknown): boolean {
 }
 
 type PuppeteerBrowser = Awaited<ReturnType<typeof puppeteer.launch>>;
+type PuppeteerPage = Awaited<ReturnType<PuppeteerBrowser['newPage']>>;
 
 async function htmlToCouponPdfBuffer(
   html: string,
   browser: PuppeteerBrowser,
   couponCountOnPage: number,
-): Promise<Uint8Array> {
+  reusePage?: PuppeteerPage | null,
+): Promise<{ buffer: Uint8Array; page: PuppeteerPage }> {
   const timeoutMs = puppeteerPdfTimeoutMs();
   const pageH = couponPrintPageHeightMm(couponCountOnPage);
-  const page = await browser.newPage();
-  try {
-    page.setDefaultTimeout(timeoutMs);
-    await page.emulateMediaType('screen');
-    await page.setContent(html, {
-      waitUntil: 'domcontentloaded',
-      timeout: timeoutMs,
-    });
-    return await page.pdf({
-      width: `${COUPON_W_MM}mm`,
-      height: `${pageH}mm`,
-      printBackground: true,
-      omitBackground: true,
-      preferCSSPageSize: false,
-      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
-    });
-  } finally {
-    await page.close();
-  }
+  const page = reusePage ?? (await browser.newPage());
+  page.setDefaultTimeout(timeoutMs);
+  await page.emulateMediaType('screen');
+  await page.setContent(html, {
+    waitUntil: 'domcontentloaded',
+    timeout: timeoutMs,
+  });
+  const buffer = await page.pdf({
+    width: `${COUPON_W_MM}mm`,
+    height: `${pageH}mm`,
+    printBackground: true,
+    omitBackground: true,
+    preferCSSPageSize: false,
+    margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+  });
+  return { buffer, page };
 }
 
 @Injectable()
@@ -644,58 +643,89 @@ export class CouponsService {
       couponPhoneScanUri: toSvgDataUri(couponPhoneScanSvg),
     };
 
-    const printPages: { svg: string; count: number }[] = [];
-    for (
-      let pageStart = 0;
-      pageStart < coupons.length;
-      pageStart += COUPON_BATCH_PDF_FRONTS_PER_PAGE
-    ) {
-      const slice = coupons.slice(
-        pageStart,
-        pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
+    const buildFacesForSlice = async (
+      slice: typeof coupons,
+      globalOffset: number,
+      idPrefix: string,
+    ): Promise<CouponFrontFaceInput[]> => {
+      const qrCodes = await Promise.all(
+        slice.map((c) =>
+          QRCode.toDataURL(String(c.code), {
+            margin: 0,
+            width: 384,
+            color: { dark: '#1F2937', light: '#FFFFFF' },
+          }),
+        ),
       );
-      const faces: CouponFrontFaceInput[] = [];
-      for (let j = 0; j < slice.length; j++) {
-        const c = slice[j];
-        const code = String(c.code);
-        const points = Number(c.points ?? 0);
-        const qr = await QRCode.toDataURL(code, {
-          margin: 0,
-          width: 520,
-          color: { dark: '#1F2937', light: '#FFFFFF' }, // White background for QR code
-        });
-        faces.push({
-          code,
-          points,
-          qrDataUrl: qr,
-          idSuffix: `f${pageStart + j}`,
-        });
-      }
-      const pageSvg = buildCouponPrintPageSvg(faces, assets);
-      printPages.push({ svg: pageSvg, count: slice.length });
-    }
+      return slice.map((c, j) => ({
+        code: String(c.code),
+        points: Number(c.points ?? 0),
+        qrDataUrl: qrCodes[j],
+        idSuffix: `${idPrefix}${globalOffset + j}`,
+      }));
+    };
 
+    const browserChunkSize = couponExportBrowserChunkSize();
     const timeoutMs = puppeteerPdfTimeoutMs();
-    const browser = await launchPuppeteerForPdf(timeoutMs);
     const pdfParts: Uint8Array[] = [];
-    try {
-      for (const printPage of printPages) {
-        const html = buildCouponBatchPdfHtml(printPage.svg, printPage.count);
-        try {
-          pdfParts.push(
-            await htmlToCouponPdfBuffer(html, browser, printPage.count),
-          );
-        } catch (pdfErr) {
-          if (isPuppeteerCrashError(pdfErr)) {
-            throw new ServiceUnavailableException(
-              'Coupon PDF export ran out of memory. Try again, or export a smaller batch.',
-            );
-          }
-          throw pdfErr;
-        }
+
+    for (
+      let chunkStart = 0;
+      chunkStart < coupons.length;
+      chunkStart += browserChunkSize
+    ) {
+      const couponChunk = coupons.slice(
+        chunkStart,
+        chunkStart + browserChunkSize,
+      );
+      const printPages: { svg: string; count: number }[] = [];
+      for (
+        let pageStart = 0;
+        pageStart < couponChunk.length;
+        pageStart += COUPON_BATCH_PDF_FRONTS_PER_PAGE
+      ) {
+        const slice = couponChunk.slice(
+          pageStart,
+          pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
+        );
+        const faces = await buildFacesForSlice(
+          slice,
+          chunkStart + pageStart,
+          'f',
+        );
+        printPages.push({
+          svg: buildCouponPrintPageSvg(faces, assets),
+          count: slice.length,
+        });
       }
-    } finally {
-      await browser.close().catch(() => undefined);
+
+      const browser = await launchPuppeteerForPdf(timeoutMs);
+      let pdfPage: PuppeteerPage | null = null;
+      try {
+        for (const printPage of printPages) {
+          const html = buildCouponBatchPdfHtml(printPage.svg, printPage.count);
+          try {
+            const { buffer, page } = await htmlToCouponPdfBuffer(
+              html,
+              browser,
+              printPage.count,
+              pdfPage,
+            );
+            pdfPage = page;
+            pdfParts.push(buffer);
+          } catch (pdfErr) {
+            if (isPuppeteerCrashError(pdfErr)) {
+              throw new ServiceUnavailableException(
+                'Coupon PDF export ran out of memory. Wait a moment and try again, or export a smaller batch.',
+              );
+            }
+            throw pdfErr;
+          }
+        }
+      } finally {
+        if (pdfPage) await pdfPage.close().catch(() => undefined);
+        await browser.close().catch(() => undefined);
+      }
     }
     return mergeCouponPdfBuffers(pdfParts);
   }

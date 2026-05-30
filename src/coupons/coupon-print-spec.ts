@@ -30,6 +30,16 @@ export function couponFrontsPerA4Page(): number {
   return Math.max(1, Math.floor(printableH / COUPON_H_MM));
 }
 
+/** Max height of one Puppeteer PDF page when stacking coupons (mm). */
+export const COUPON_PDF_MAX_PAGE_HEIGHT_MM = 450;
+
+/** Coupons per print PDF page (custom page height, not A4). */
+export function couponFrontsPerPrintPage(): number {
+  const unit = COUPON_H_MM + COUPON_V_GAP_MM;
+  const n = Math.floor((COUPON_PDF_MAX_PAGE_HEIGHT_MM + COUPON_V_GAP_MM) / unit);
+  return Math.max(1, n);
+}
+
 /** Exact PDF page height for N stacked coupons (mm), including gaps. */
 export function couponPrintPageHeightMm(couponCount: number): number {
   if (couponCount <= 0) return 0;
