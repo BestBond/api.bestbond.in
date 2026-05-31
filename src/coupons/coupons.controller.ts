@@ -187,7 +187,7 @@ export class CouponsController {
     fs.createReadStream(zipPath).pipe(res);
   }
 
-  /** HTML preview with transparent gaps on a dark canvas (matches print layout). */
+  /** HTML preview — same SVG stack as print PDF (101×38 mm, zero gap). */
   @Get('batches/:batchId/preview.html')
   @RequirePermissions('coupons.manage')
   async exportBatchPreviewHtml(
@@ -195,6 +195,20 @@ export class CouponsController {
     @Res() res: Response,
   ) {
     const html = await this.coupons.exportBatchPreviewHtml({ batchId });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.status(200).send(html);
+  }
+
+  /** Single coupon face — same renderer as PDF (for admin modal preview). */
+  @Get('batches/:batchId/preview-face.html')
+  @RequirePermissions('coupons.manage')
+  async exportCouponFacePreviewHtml(
+    @Param('batchId') batchId: string,
+    @Query('code') code: string,
+    @Res() res: Response,
+  ) {
+    const html = await this.coupons.exportCouponFacePreviewHtml({ batchId, code });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.status(200).send(html);
