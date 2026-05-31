@@ -430,15 +430,6 @@ export class AdminService {
 
     const qb = this.usersRepo.createQueryBuilder('u');
 
-    // User Management lists end customers/dealers only — not staff accounts.
-    qb.andWhere(
-      `NOT EXISTS (
-        SELECT 1 FROM user_roles ur
-        INNER JOIN roles r ON r.id = ur.role_id
-        WHERE ur.user_id = u.id AND UPPER(r.name) IN ('SUPERADMIN', 'OPERATIONAL_ADMIN')
-      )`,
-    );
-
     if (params.excludeUserId) {
       qb.andWhere('u.id != :excludeUserId', { excludeUserId: params.excludeUserId });
     }
@@ -463,15 +454,7 @@ export class AdminService {
         'contractor/painter',
         'contractor/worker',
       ];
-      if (p === 'dealer') {
-        qb.innerJoin('u.roles', 'rf').andWhere('UPPER(rf.name) = :dealerRole', {
-          dealerRole: 'DEALER',
-        });
-      } else if (p === 'contractor/painter' || p === 'contractor/worker') {
-        qb.innerJoin('u.roles', 'rf').andWhere('UPPER(rf.name) = :customerRole', {
-          customerRole: 'CUSTOMER',
-        });
-      } else if (workerProfessions.includes(p)) {
+      if (p === 'contractor/painter' || p === 'contractor/worker') {
         qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) IN (:...w)', {
           w: workerProfessions,
         });
