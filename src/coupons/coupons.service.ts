@@ -450,55 +450,6 @@ function loadCouponExportAssets(): CouponFrontSvgAssets {
   };
 }
 
-/** Same HTML shell as export preview — one flush SVG stack, zero gap between coupons. */
-function wrapCouponPrintPreviewHtml(
-  stackSvg: string,
-  noteHtml = '',
-): string {
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body {
-        margin: 0;
-        padding: 24px;
-        background: #151515;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      }
-      .preview-note {
-        color: #fbbf24;
-        text-align: center;
-        font-size: 14px;
-        margin-bottom: 24px;
-        max-width: 520px;
-        margin-left: auto;
-        margin-right: auto;
-      }
-      .preview-stack {
-        display: flex;
-        justify-content: center;
-        margin: 0 auto;
-        line-height: 0;
-        font-size: 0;
-      }
-      .preview-stack > svg {
-        display: block;
-        width: min(101mm, 100%);
-        height: auto;
-        border-radius: 0 !important;
-      }
-    </style>
-  </head>
-  <body>
-    ${noteHtml}
-    <div class="preview-stack">${stackSvg}</div>
-  </body>
-</html>`;
-}
-
 async function buildFacesForCouponSlice(
   slice: CouponPdfRow[],
   globalOffset: number,
@@ -1085,31 +1036,80 @@ export class CouponsService implements OnModuleInit {
     });
 
     const assets = loadCouponExportAssets();
-    const faces = await buildFacesForCouponSlice(coupons, 0, 'pv');
-    const stackSvg = buildCouponPrintPageSvg(faces, assets);
+    const pageBlocks: string[] = [];
+    for (
+      let pageStart = 0;
+      pageStart < coupons.length;
+      pageStart += COUPON_BATCH_PDF_FRONTS_PER_PAGE
+    ) {
+      const slice = coupons.slice(
+        pageStart,
+        pageStart + COUPON_BATCH_PDF_FRONTS_PER_PAGE,
+      );
+      const faces = await buildFacesForCouponSlice(
+        slice,
+        pageStart,
+        'pv',
+      );
+      pageBlocks.push(
+        `<div class="print-page">${buildCouponPrintPageSvg(faces, assets)}</div>`,
+      );
+    }
 
     const previewNote =
       totalCoupons > previewCount
         ? `<p class="preview-note">Showing first ${previewCount} of ${totalCoupons.toLocaleString()} coupons. Download exports the full batch.</p>`
         : '';
 
-    return wrapCouponPrintPreviewHtml(stackSvg, previewNote);
-  }
-
-  async exportCouponFacePreviewHtml(params: { batchId: string; code: string }) {
-    const batchId = params.batchId.trim();
-    const code = params.code.trim();
-    if (!batchId || !code) throw new BadRequestException('Invalid batch or code');
-
-    const coupon = await this.couponsRepo.findOne({
-      where: { batchId, code },
-    });
-    if (!coupon) throw new NotFoundException('Coupon not found');
-
-    const assets = loadCouponExportAssets();
-    const faces = await buildFacesForCouponSlice([coupon], 0, 'sf');
-    const stackSvg = buildCouponPrintPageSvg(faces, assets);
-    return wrapCouponPrintPreviewHtml(stackSvg);
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #151515;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      }
+      .preview-note {
+        color: #fbbf24;
+        text-align: center;
+        font-size: 14px;
+        margin-bottom: 24px;
+        max-width: 520px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .preview-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+        align-items: center;
+        margin: 0 auto;
+      }
+      .print-page {
+        display: block;
+        line-height: 0;
+        font-size: 0;
+        background: transparent;
+      }
+      .print-page > svg {
+        display: block;
+        max-width: min(101mm, 100%);
+        height: auto;
+      }
+    </style>
+  </head>
+  <body>
+    ${previewNote}
+    <div class="preview-stack">
+      ${pageBlocks.join('\n')}
+    </div>
+  </body>
+</html>`;
   }
 
   async redeem(params: { userId: string; userRoles: string[]; code: string }) {
