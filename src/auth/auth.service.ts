@@ -200,8 +200,9 @@ export class AuthService {
       throw new UnauthorizedException('Account not found');
     }
     await this.verifyPasscode(params.passcode, loaded?.pinHash);
+    await this.users.syncTradeRoleFromProfession(user.id);
 
-    const snap = this.authSnapshot(loaded);
+    const snap = this.authSnapshot(await this.users.findById(user.id));
     return {
       accessToken: await this.jwt.signAsync({ sub: user.id, email: user.email }),
       roles: snap.roles,

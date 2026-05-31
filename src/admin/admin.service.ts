@@ -48,6 +48,48 @@ function assertOpsCanAccessDealerRedemption(auth: AuthUser, r: Redemption) {
   }
 }
 
+/** Matches admin user list + dealer search — role DEALER or profile profession Dealer. */
+const SQL_USER_IS_DEALER = `(
+  EXISTS (
+    SELECT 1 FROM user_roles ur
+    INNER JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = u.id AND UPPER(r.name) = 'DEALER'
+  )
+  OR LOWER(TRIM(COALESCE(u.profession, ''))) = 'dealer'
+)`;
+
+const SQL_USER_IS_CONTRACTOR_WORKER = `(
+  NOT ${SQL_USER_IS_DEALER}
+  AND (
+    EXISTS (
+      SELECT 1 FROM user_roles ur
+      INNER JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = u.id AND UPPER(r.name) = 'CUSTOMER'
+    )
+    OR LOWER(TRIM(COALESCE(u.profession, ''))) IN (
+      'contractor', 'painter', 'worker', 'contractor/painter', 'contractor/worker'
+    )
+    OR LOWER(TRIM(COALESCE(u.profession, ''))) = ''
+  )
+)`;
+
+function isDealerEndUser(user: Pick<User, 'profession' | 'roles'>): boolean {
+  const roleNames = (user.roles ?? []).map((r) => String(r.name).toUpperCase());
+  if (roleNames.includes('DEALER')) return true;
+  return (user.profession ?? '').trim().toLowerCase() === 'dealer';
+}
+
+function endUserProfessionLabel(
+  user: Pick<User, 'profession' | 'roles'>,
+): string | null {
+  if (isDealerEndUser(user)) return 'Dealer';
+  const prof = user.profession?.trim();
+  if (prof) return prof;
+  const roleNames = (user.roles ?? []).map((r) => String(r.name).toUpperCase());
+  if (roleNames.includes('CUSTOMER')) return 'Contractor/Worker';
+  return null;
+}
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -376,11 +418,11 @@ export class AdminService {
     offset: number;
   }) {
     const q = (params.q ?? '').trim();
-    const qb = this.usersRepo
-      .createQueryBuilder('u')
-      .leftJoin('u.roles', 'r')
-      .where('r.name = :role', { role: 'DEALER' })
-      .andWhere('u.isActive = :active', { active: true });
+    const qb = this.usersRepo.createQueryBuilder('u');
+
+    qb.andWhere(SQL_USER_IS_DEALER).andWhere('u.isActive = :active', {
+      active: true,
+    });
 
     if (q.length) {
       const like = `%${q.toLowerCase()}%`;
@@ -456,25 +498,10 @@ export class AdminService {
 
     if (profession.length && profession.toLowerCase() !== 'all') {
       const p = profession.toLowerCase().replace(/\s+/g, '');
-      const workerProfessions = [
-        'contractor',
-        'painter',
-        'worker',
-        'contractor/painter',
-        'contractor/worker',
-      ];
       if (p === 'dealer') {
-        qb.innerJoin('u.roles', 'rf').andWhere('UPPER(rf.name) = :dealerRole', {
-          dealerRole: 'DEALER',
-        });
+        qb.andWhere(SQL_USER_IS_DEALER);
       } else if (p === 'contractor/painter' || p === 'contractor/worker') {
-        qb.innerJoin('u.roles', 'rf').andWhere('UPPER(rf.name) = :customerRole', {
-          customerRole: 'CUSTOMER',
-        });
-      } else if (workerProfessions.includes(p)) {
-        qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) IN (:...w)', {
-          w: workerProfessions,
-        });
+        qb.andWhere(SQL_USER_IS_CONTRACTOR_WORKER);
       } else {
         qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) = :p', {
           p: profession.toLowerCase(),
@@ -485,7 +512,11 @@ export class AdminService {
     qb.orderBy('u.updatedAt', 'DESC').addOrderBy('u.createdAt', 'DESC');
 
     const total = await qb.getCount();
-    const rows = await qb.skip(params.offset).take(params.take).getMany();
+    const rows = await qb
+      .leftJoinAndSelect('u.roles', 'listRoles')
+      .skip(params.offset)
+      .take(params.take)
+      .getMany();
     const hasMore = params.offset + rows.length < total;
 
     return {
@@ -494,7 +525,7 @@ export class AdminService {
       items: rows.map((u) => ({
         id: u.id,
         name: u.fullName?.trim() || u.email.split('@')[0] || 'User',
-        profession: u.profession ?? null,
+        profession: endUserProfessionLabel(u),
         walletBalance: u.loyaltyPoints ?? 0,
         status: u.isActive ? 'ACTIVE' : 'SUSPENDED',
         staffApprovedAt: (u as any).staffApprovedAt ?? null,
