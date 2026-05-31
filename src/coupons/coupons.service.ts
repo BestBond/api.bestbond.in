@@ -450,22 +450,6 @@ function loadCouponExportAssets(): CouponFrontSvgAssets {
   };
 }
 
-/** Single coupon for modal — SVG only, no padding or background chrome. */
-function wrapCouponFacePreviewHtml(stackSvg: string): string {
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
-      svg { display: block; width: 100%; height: auto; border-radius: 0 !important; }
-    </style>
-  </head>
-  <body>${stackSvg}</body>
-</html>`;
-}
-
 /** Same HTML shell as export preview — one flush SVG stack, zero gap between coupons. */
 function wrapCouponPrintPreviewHtml(
   stackSvg: string,
@@ -1125,7 +1109,7 @@ export class CouponsService implements OnModuleInit {
     const assets = loadCouponExportAssets();
     const faces = await buildFacesForCouponSlice([coupon], 0, 'sf');
     const stackSvg = buildCouponPrintPageSvg(faces, assets);
-    return wrapCouponFacePreviewHtml(stackSvg);
+    return wrapCouponPrintPreviewHtml(stackSvg);
   }
 
   async redeem(params: { userId: string; userRoles: string[]; code: string }) {
