@@ -48,6 +48,17 @@ function assertOpsCanAccessDealerRedemption(auth: AuthUser, r: Redemption) {
   }
 }
 
+/** List/profile chip — staff roles override empty profession on user row. */
+function userListProfessionLabel(u: User): string | null {
+  const roleNames = new Set(
+    (u.roles ?? []).map((r) => String(r.name).toUpperCase()),
+  );
+  if (roleNames.has('OPERATIONAL_ADMIN')) return 'Ops Admin';
+  if (roleNames.has('SUPERADMIN')) return 'Super Admin';
+  const p = u.profession?.trim();
+  return p && p.length > 0 ? p : null;
+}
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -428,7 +439,7 @@ export class AdminService {
     const q = (params.q ?? '').trim();
     const profession = (params.profession ?? '').trim();
 
-    const qb = this.usersRepo.createQueryBuilder('u');
+    const qb = this.usersRepo.createQueryBuilder('u').leftJoinAndSelect('u.roles', 'roles');
 
     if (params.excludeUserId) {
       qb.andWhere('u.id != :excludeUserId', { excludeUserId: params.excludeUserId });
@@ -454,14 +465,36 @@ export class AdminService {
         'contractor/painter',
         'contractor/worker',
       ];
-      if (p === 'contractor/painter' || p === 'contractor/worker') {
+      if (p === 'opsadmin') {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1 FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = u.id AND UPPER(r.name) = 'OPERATIONAL_ADMIN'
+          )`,
+        );
+      } else if (p === 'contractor/painter' || p === 'contractor/worker') {
         qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) IN (:...w)', {
           w: workerProfessions,
         });
+        qb.andWhere(
+          `NOT EXISTS (
+            SELECT 1 FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = u.id AND UPPER(r.name) IN ('OPERATIONAL_ADMIN', 'SUPERADMIN')
+          )`,
+        );
       } else {
         qb.andWhere('LOWER(TRIM(COALESCE(u.profession, \'\'))) = :p', {
           p: profession.toLowerCase(),
         });
+        qb.andWhere(
+          `NOT EXISTS (
+            SELECT 1 FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = u.id AND UPPER(r.name) IN ('OPERATIONAL_ADMIN', 'SUPERADMIN')
+          )`,
+        );
       }
     }
 
@@ -477,7 +510,7 @@ export class AdminService {
       items: rows.map((u) => ({
         id: u.id,
         name: u.fullName?.trim() || u.email.split('@')[0] || 'User',
-        profession: u.profession ?? null,
+        profession: userListProfessionLabel(u),
         walletBalance: u.loyaltyPoints ?? 0,
         status: u.isActive ? 'ACTIVE' : 'SUSPENDED',
         staffApprovedAt: (u as any).staffApprovedAt ?? null,
@@ -486,7 +519,10 @@ export class AdminService {
   }
 
   async getUserById(userId: string) {
-    const u = await this.usersRepo.findOne({ where: { id: userId } });
+    const u = await this.usersRepo.findOne({
+      where: { id: userId },
+      relations: { roles: true },
+    });
     if (!u) throw new NotFoundException('User not found');
 
     const name = u.fullName?.trim() || u.email.split('@')[0] || 'User';
@@ -494,7 +530,7 @@ export class AdminService {
       id: u.id,
       fullName: u.fullName ?? null,
       displayName: name,
-      profession: u.profession ?? null,
+      profession: userListProfessionLabel(u),
       status: u.isActive ? 'ACTIVE' : 'SUSPENDED',
       loyaltyPoints: u.loyaltyPoints ?? 0,
       phone: u.phone ?? null,
