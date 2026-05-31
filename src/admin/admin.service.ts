@@ -481,6 +481,21 @@ export class AdminService {
           `NOT EXISTS (
             SELECT 1 FROM user_roles ur
             INNER JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = u.id AND UPPER(r.name) IN ('OPERATIONAL_ADMIN', 'SUPERADMIN', 'DEALER')
+          )`,
+        );
+      } else if (p === 'dealer') {
+        qb.andWhere(
+          `(LOWER(TRIM(COALESCE(u.profession, ''))) = 'dealer' OR EXISTS (
+            SELECT 1 FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
+            WHERE ur.user_id = u.id AND UPPER(r.name) = 'DEALER'
+          ))`,
+        );
+        qb.andWhere(
+          `NOT EXISTS (
+            SELECT 1 FROM user_roles ur
+            INNER JOIN roles r ON r.id = ur.role_id
             WHERE ur.user_id = u.id AND UPPER(r.name) IN ('OPERATIONAL_ADMIN', 'SUPERADMIN')
           )`,
         );
