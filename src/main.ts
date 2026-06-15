@@ -145,11 +145,10 @@ async function bootstrap() {
   }
 
   const port = Number(process.env.PORT ?? 3000);
-  // Bind explicitly so iOS simulator + other clients can reach it reliably.
-  await app.listen(port);
-  // Helps verify the running build exposes staff routes (expect 401 without JWT, not 404).
+  // Bind on all interfaces so physical devices on the same Wi‑Fi can reach the API.
+  await app.listen(port, '0.0.0.0');
   console.log(
-    `Reward API listening on ${port} — health: GET /health — admin: GET /admin/dashboard`,
+    `Reward API listening on 0.0.0.0:${port} — health: GET /health — admin: GET /admin/dashboard`,
   );
   if (!isProduction) {
     console.log(

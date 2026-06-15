@@ -16,6 +16,7 @@ import type { FindOptionsWhere } from 'typeorm';
 import * as path from 'path';
 import * as fs from 'fs';
 import QRCode from 'qrcode';
+import { buildCouponQrUrl } from './coupon-link.config';
 import puppeteer from 'puppeteer';
 import { PDFDocument } from 'pdf-lib';
 import {
@@ -522,7 +523,7 @@ async function buildFacesForCouponSlice(
 ): Promise<CouponFrontFaceInput[]> {
   const qrCodes = await Promise.all(
     slice.map((c) =>
-      QRCode.toDataURL(String(c.code), {
+      QRCode.toDataURL(buildCouponQrUrl(String(c.code)), {
         margin: 0,
         width: 384,
         color: { dark: '#1F2937', light: '#FFFFFF' },

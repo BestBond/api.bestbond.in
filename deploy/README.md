@@ -81,6 +81,34 @@ pm2 reload bestbond-reward-api --update-env
 
 Upstream must match `PORT` in `.env.production` (typically **3001**). See `deploy/nginx-api.bestbond.in.conf.sample`.
 
+## Coupon QR camera scan (`GET /c/:code`)
+
+Printed coupon QRs encode `https://api.bestbond.in/c/{CODE}` (12-char hex). When scanned with the phone camera:
+
+1. **App installed** — Universal Link / App Link opens BestBond on the **Scan** tab (no auto-redeem).
+2. **App not installed** — a minimal HTML page tries `bestbond://scan`, then redirects to the App Store or Play Store.
+
+Public routes (no JWT):
+
+| Path | Purpose |
+|------|---------|
+| `GET /c/:code` | Smart open page |
+| `GET /.well-known/apple-app-site-association` | iOS Universal Links |
+| `GET /.well-known/assetlinks.json` | Android App Links |
+
+Optional env (see `.env.production.example`): `COUPON_LINK_BASE_URL`, `IOS_APP_STORE_URL`, `ANDROID_PLAY_STORE_URL`, `ANDROID_APP_LINK_SHA256`.
+
+**Android App Links:** set `ANDROID_APP_LINK_SHA256` to the Play App Signing certificate SHA-256 (colon-separated). Without it, `assetlinks.json` is empty and HTTPS links open in the browser fallback page only.
+
+Verify after deploy:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}" https://api.bestbond.in/c/ABCDEF012345
+curl -sS https://api.bestbond.in/.well-known/apple-app-site-association
+```
+
+Requires a new mobile app release (deep links + entitlements in `BestBond`).
+
 ## Mobile account deletion (App Store 5.1.1)
 
 Customer/dealer apps call:
