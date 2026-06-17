@@ -19,6 +19,22 @@ const CATALOG: Array<{
   sortOrder: number;
 }> = [
   {
+    title: 'BestBond Steel Bottle',
+    description: 'BestBond branded stainless steel water bottle.',
+    pointsCost: 500,
+    giftTier: 'WORKER',
+    imageFile: 'best_bond_bottle.jpeg',
+    sortOrder: 3,
+  },
+  {
+    title: 'BestBond Umbrella',
+    description: 'BestBond branded umbrella.',
+    pointsCost: 500,
+    giftTier: 'WORKER',
+    imageFile: 'editable_umbrella_design.pdf.pdf',
+    sortOrder: 6,
+  },
+  {
     title: 'Levelling system',
     description: 'Professional levelling system for construction work.',
     pointsCost: 1000,
