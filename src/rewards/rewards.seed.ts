@@ -102,7 +102,7 @@ const CATALOG: Array<{
   {
     title: 'Apple Iphone 17 PRO',
     description: 'Apple iPhone 17 Pro reward.',
-    pointsCost: 2000000,
+    pointsCost: 200000,
     giftTier: 'CONTRACTOR',
     imageFile: 'iphone_17_pro.png',
     sortOrder: 200,
@@ -110,7 +110,7 @@ const CATALOG: Array<{
   {
     title: 'Honda Activa 125',
     description: 'Honda Activa 125 scooter reward.',
-    pointsCost: 3000000,
+    pointsCost: 300000,
     giftTier: 'CONTRACTOR',
     imageFile: 'honda_active_125.png',
     sortOrder: 210,
@@ -118,7 +118,7 @@ const CATALOG: Array<{
   {
     title: 'Bullet 350 Millitary Black - Base',
     description: 'Royal Enfield Bullet 350 Military Black - Base model.',
-    pointsCost: 5000000,
+    pointsCost: 500000,
     giftTier: 'CONTRACTOR',
     imageFile: 'bullet_350_military_black_1.png',
     sortOrder: 220,
