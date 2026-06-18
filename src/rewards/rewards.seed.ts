@@ -31,7 +31,7 @@ const CATALOG: Array<{
     description: 'BestBond branded umbrella.',
     pointsCost: 500,
     giftTier: 'WORKER',
-    imageFile: 'editable_umbrella_design.pdf.pdf',
+    imageFile: 'umbrella_image.png',
     sortOrder: 6,
   },
   {
