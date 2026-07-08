@@ -65,6 +65,10 @@ export class User {
   @Column({ name: 'loyalty_points', type: 'integer', default: 0 })
   loyaltyPoints!: number;
 
+  /** When current wallet balance resets to 0 if unused (annual from signup). */
+  @Column({ name: 'wallet_points_expires_at', type: 'datetime', nullable: true })
+  walletPointsExpiresAt!: Date | null;
+
   @ManyToMany(() => Role, (role) => role.users, { cascade: false })
   @JoinTable({
     name: 'user_roles',

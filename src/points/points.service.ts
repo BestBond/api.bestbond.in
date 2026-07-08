@@ -11,6 +11,11 @@ import {
   PointsTransaction,
   PointsTransactionType,
 } from './entities/points-transaction.entity';
+import {
+  initialWalletPointsExpiresAt,
+  serializeWalletExpiry,
+  WALLET_POINTS_VALIDITY_MS,
+} from './points-expiry.util';
 
 @Injectable()
 export class PointsService {
@@ -20,6 +25,61 @@ export class PointsService {
     @InjectRepository(PointsTransaction)
     private readonly txRepo: Repository<PointsTransaction>,
   ) {}
+
+  walletExpiryFields(user: Pick<User, 'walletPointsExpiresAt'>) {
+    return serializeWalletExpiry(user.walletPointsExpiresAt);
+  }
+
+  async ensureWalletFresh(userId: string): Promise<User> {
+    return this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const user = await userRepo.findOne({ where: { id: userId } });
+      if (!user) throw new NotFoundException('User not found');
+      return this.expireWalletIfDueWithManager(manager, user);
+    });
+  }
+
+  private async expireWalletIfDueWithManager(
+    manager: EntityManager,
+    user: User,
+  ): Promise<User> {
+    const userRepo = manager.getRepository(User);
+    const txRepo = manager.getRepository(PointsTransaction);
+    const now = Date.now();
+    let changed = false;
+
+    if (!user.walletPointsExpiresAt) {
+      user.walletPointsExpiresAt = initialWalletPointsExpiresAt(user.createdAt);
+      changed = true;
+    }
+
+    while (
+      user.walletPointsExpiresAt &&
+      user.walletPointsExpiresAt.getTime() <= now
+    ) {
+      const balance = user.loyaltyPoints ?? 0;
+      if (balance > 0) {
+        const tx = txRepo.create({
+          user,
+          type: 'POINTS_EXPIRE',
+          pointsDelta: -balance,
+          title: 'Annual wallet reset — unused points expired',
+          site: null,
+        });
+        await txRepo.save(tx);
+        user.loyaltyPoints = 0;
+      }
+      user.walletPointsExpiresAt = new Date(
+        user.walletPointsExpiresAt.getTime() + WALLET_POINTS_VALIDITY_MS,
+      );
+      changed = true;
+    }
+
+    if (changed) {
+      return userRepo.save(user);
+    }
+    return user;
+  }
 
   async creditWithManager(
     manager: EntityManager,
@@ -38,8 +98,10 @@ export class PointsService {
     const userRepo = manager.getRepository(User);
     const txRepo = manager.getRepository(PointsTransaction);
 
-    const user = await userRepo.findOne({ where: { id: params.userId } });
+    let user = await userRepo.findOne({ where: { id: params.userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    user = await this.expireWalletIfDueWithManager(manager, user);
 
     user.loyaltyPoints = (user.loyaltyPoints ?? 0) + params.points;
     if (user.loyaltyPoints < 0) {
@@ -75,13 +137,16 @@ export class PointsService {
   }
 
   async listForUser(userId: string, limit = 20) {
+    const user = await this.ensureWalletFresh(userId);
     const txs = await this.txRepo.find({
       where: { user: { id: userId } },
       order: { createdAt: 'DESC' },
       take: limit,
     });
-    const user = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
-    return { balance: user.loyaltyPoints, transactions: txs };
+    return {
+      balance: user.loyaltyPoints,
+      ...this.walletExpiryFields(user),
+      transactions: txs,
+    };
   }
 }

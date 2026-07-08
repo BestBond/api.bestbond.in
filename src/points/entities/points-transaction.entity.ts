@@ -11,7 +11,8 @@ import { User } from '../../users/entities/user.entity';
 export type PointsTransactionType =
   | 'COUPON_SCAN'
   | 'REWARD_REDEEM'
-  | 'REDEMPTION_REFUND';
+  | 'REDEMPTION_REFUND'
+  | 'POINTS_EXPIRE';
 
 @Entity({ name: 'points_transactions' })
 export class PointsTransaction {

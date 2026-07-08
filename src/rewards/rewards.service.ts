@@ -39,13 +39,13 @@ export class RewardsService {
   }
 
   async getMyGiftTier(userId: string) {
-    const user = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
+    const user = await this.points.ensureWalletFresh(userId);
     const loyaltyPoints = user.loyaltyPoints ?? 0;
     return {
       giftTier: RewardsService.resolveGiftTier(loyaltyPoints),
       loyaltyPoints,
       contractorThreshold: CONTRACTOR_TIER_THRESHOLD,
+      ...this.points.walletExpiryFields(user),
     };
   }
 

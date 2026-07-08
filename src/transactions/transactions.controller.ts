@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import type { AuthUser } from '../auth/auth-user';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { PointsService } from '../points/points.service';
 import { PointsTransaction } from '../points/entities/points-transaction.entity';
 
 type Period = 'THIS_MONTH' | 'ALL';
@@ -12,6 +13,7 @@ export class TransactionsController {
   constructor(
     @InjectRepository(PointsTransaction)
     private readonly txRepo: Repository<PointsTransaction>,
+    private readonly points: PointsService,
   ) {}
 
   @Get('me')
@@ -22,6 +24,7 @@ export class TransactionsController {
     @Query('offset') offset?: string,
   ) {
     const user = req.user as AuthUser;
+    const freshUser = await this.points.ensureWalletFresh(user.id);
     const take = limit ? Math.max(1, Math.min(100, Number(limit))) : 20;
     const skip = offset ? Math.max(0, Math.min(10_000, Number(offset))) : 0;
 
@@ -71,6 +74,7 @@ export class TransactionsController {
       totalPointsEarned: earned,
       totalPointsSpent: spent,
       hasMore: transactions.length === take,
+      ...this.points.walletExpiryFields(freshUser),
       transactions: transactions.map((t) => ({
         id: t.id,
         type: t.type,

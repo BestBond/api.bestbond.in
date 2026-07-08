@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AuthUser } from '../auth/auth-user';
 import { RequireAnyPermissions } from '../auth/require-any-permissions.decorator';
+import { PointsService } from '../points/points.service';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateAdminPreferencesDto } from './dto/update-admin-preferences.dto';
@@ -11,7 +12,10 @@ import { DeleteAccountDto } from './dto/delete-account.dto';
 
 @Controller('users')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly points: PointsService,
+  ) {}
 
   @Get('me')
   me(@Req() req: Request) {
@@ -21,17 +25,18 @@ export class UsersController {
   @Get('me/profile')
   async myProfile(@Req() req: Request) {
     const auth = req.user as AuthUser;
-    const user = await this.users.findById(auth.id);
+    const user = await this.points.ensureWalletFresh(auth.id);
     const profileComplete = this.users.isProfileComplete(user);
     return {
       id: auth.id,
       email: auth.email,
-      phone: user?.phone ?? null,
-      fullName: user?.fullName ?? null,
-      profession: user?.profession ?? null,
-      deliveryAddress: user?.deliveryAddress ?? null,
-      loyaltyPoints: user?.loyaltyPoints ?? 0,
-      memberSinceYear: user?.createdAt ? user.createdAt.getFullYear() : null,
+      phone: user.phone ?? null,
+      fullName: user.fullName ?? null,
+      profession: user.profession ?? null,
+      deliveryAddress: user.deliveryAddress ?? null,
+      loyaltyPoints: user.loyaltyPoints ?? 0,
+      memberSinceYear: user.createdAt ? user.createdAt.getFullYear() : null,
+      ...this.points.walletExpiryFields(user),
       profileComplete,
       roles: auth.roles,
       permissions: auth.permissions,
@@ -46,6 +51,7 @@ export class UsersController {
       profession: dto.profession ?? undefined,
       deliveryAddress: dto.deliveryAddress ?? undefined,
     });
+    const fresh = await this.points.ensureWalletFresh(updated.id);
     const roles = (updated.roles ?? []).map((r) => r.name);
     const permissions = Array.from(
       new Set(
@@ -55,15 +61,16 @@ export class UsersController {
       ),
     );
     return {
-      id: updated.id,
-      email: updated.email,
-      phone: updated.phone,
-      fullName: updated.fullName,
-      profession: updated.profession,
-      deliveryAddress: updated.deliveryAddress,
-      loyaltyPoints: updated.loyaltyPoints,
-      memberSinceYear: updated.createdAt.getFullYear(),
-      profileComplete: this.users.isProfileComplete(updated),
+      id: fresh.id,
+      email: fresh.email,
+      phone: fresh.phone,
+      fullName: fresh.fullName,
+      profession: fresh.profession,
+      deliveryAddress: fresh.deliveryAddress,
+      loyaltyPoints: fresh.loyaltyPoints,
+      memberSinceYear: fresh.createdAt.getFullYear(),
+      ...this.points.walletExpiryFields(fresh),
+      profileComplete: this.users.isProfileComplete(fresh),
       roles,
       permissions,
     };
