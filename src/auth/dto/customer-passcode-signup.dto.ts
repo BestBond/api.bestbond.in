@@ -1,8 +1,8 @@
 import { IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { AuthPhoneField } from './phone-field';
 
 export class CustomerPasscodeSignupDto {
-  @IsString()
-  @Matches(/^[0-9]{10}$/)
+  @AuthPhoneField()
   phone!: string;
 
   @IsString()

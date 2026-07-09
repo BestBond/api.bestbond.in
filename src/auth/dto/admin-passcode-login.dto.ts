@@ -1,8 +1,8 @@
 import { IsString, Length, Matches } from 'class-validator';
+import { AuthPhoneField } from './phone-field';
 
 export class AdminPasscodeLoginDto {
-  @IsString()
-  @Matches(/^[0-9]{10}$/)
+  @AuthPhoneField()
   phone!: string;
 
   @IsString()
