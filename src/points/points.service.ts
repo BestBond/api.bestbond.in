@@ -19,6 +19,9 @@ import {
 
 @Injectable()
 export class PointsService {
+  /** Serialize wallet-expiry writes per user (SQLite cannot overlap TypeORM savepoints). */
+  private readonly walletFreshLocks = new Map<string, Promise<User>>();
+
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(User) private readonly usersRepo: Repository<User>,
@@ -31,11 +34,38 @@ export class PointsService {
   }
 
   async ensureWalletFresh(userId: string): Promise<User> {
+    const inflight = this.walletFreshLocks.get(userId);
+    if (inflight) return inflight;
+
+    const run = this.ensureWalletFreshUnlocked(userId).finally(() => {
+      this.walletFreshLocks.delete(userId);
+    });
+    this.walletFreshLocks.set(userId, run);
+    return run;
+  }
+
+  private async ensureWalletFreshUnlocked(userId: string): Promise<User> {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const now = Date.now();
+    const needsInit = !user.walletPointsExpiresAt;
+    const needsExpire = Boolean(
+      user.walletPointsExpiresAt &&
+        user.walletPointsExpiresAt.getTime() <= now,
+    );
+
+    // Hot path: Home fires profile + transactions in parallel — avoid opening
+    // a SQLite transaction when there is nothing to write.
+    if (!needsInit && !needsExpire) {
+      return user;
+    }
+
     return this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(User);
-      const user = await userRepo.findOne({ where: { id: userId } });
-      if (!user) throw new NotFoundException('User not found');
-      return this.expireWalletIfDueWithManager(manager, user);
+      const fresh = await userRepo.findOne({ where: { id: userId } });
+      if (!fresh) throw new NotFoundException('User not found');
+      return this.expireWalletIfDueWithManager(manager, fresh);
     });
   }
 

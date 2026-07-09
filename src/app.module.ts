@@ -50,6 +50,9 @@ import { SupportModule } from './support/support.module';
         return {
           type: 'sqlite' as const,
           database: config.get<string>('DB_PATH') ?? 'data.sqlite',
+          // Concurrent Nest requests share one SQLite connection; WAL reduces
+          // "no such savepoint" failures under parallel profile/transactions loads.
+          enableWAL: true,
           entities: [
             User,
             Role,
