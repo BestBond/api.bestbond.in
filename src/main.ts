@@ -1,10 +1,13 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
+import { config as loadDotenv } from 'dotenv';
 import helmet from 'helmet';
 import * as express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AppModule } from './app.module';
+import { assertProductionDatabase } from './database/production-db.guard';
+import { ensureWalletExpiryColumn } from './database/ensure-wallet-expiry-column';
 
 function resolveGiftAssetsDir(): string | null {
   const candidates = [
@@ -55,6 +58,19 @@ function isLocalDevBrowserOrigin(origin: string): boolean {
   }
 }
 
+function loadEnvFiles(): void {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const files = isProduction
+    ? ['.env.production', '.env']
+    : ['.env.local', '.env'];
+  for (const file of files) {
+    const fullPath = path.join(process.cwd(), file);
+    if (fs.existsSync(fullPath)) {
+      loadDotenv({ path: fullPath });
+    }
+  }
+}
+
 function assertProductionEnv(): void {
   if (process.env.NODE_ENV !== 'production') return;
   const cors = process.env.CORS_ORIGINS?.trim();
@@ -72,9 +88,20 @@ function assertProductionEnv(): void {
 }
 
 async function bootstrap() {
+  loadEnvFiles();
   assertProductionEnv();
 
   const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction) {
+    const db = await assertProductionDatabase();
+    Logger.log(
+      `[DB] Using ${db.dbPath} — ${db.userCount} users, ${db.couponCount} coupons (${db.sizeBytes} bytes)`,
+      'Bootstrap',
+    );
+  }
+
+  // Additive schema patch (nullable column only). Required when synchronize is off.
+  await ensureWalletExpiryColumn();
 
   const app = await NestFactory.create(AppModule, {
     logger: isProduction ? ['error', 'warn', 'log'] : undefined,

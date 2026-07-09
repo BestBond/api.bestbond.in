@@ -26,6 +26,20 @@ Default port: **`3001`** (when `bestbond.in` uses **3000**)
 
    Required: `PORT=3001`, `TRUST_PROXY=1`, `CORS_ORIGINS=https://admin.bestbond.in,https://bestbond.in`, strong `JWT_SECRET`, `DB_PATH`, `DATABASE_SYNCHRONIZE=false`.
 
+   **Production `DB_PATH` (critical):** use the persistent file outside the git repo:
+
+   ```env
+   DB_PATH=/home/bestbond/.local/share/reward-system/data.sqlite
+   ```
+
+   Never point production at repo-local `data.sqlite` or `/var/lib/reward-system/data.sqlite` (that path does not exist on the VPS and would create an empty database — customers see "Account not found").
+
+   Before every deploy, back up the database:
+
+   ```bash
+   bash scripts/backup-production-db.sh
+   ```
+
    Local dev: `cp .env.example .env.local` then `npm run start:dev`.
 
 4. **Nginx** — Copy `deploy/nginx-api.bestbond.in.conf.sample` to `/etc/nginx/sites-available/api.bestbond.in`, enable, `nginx -t`, reload. TLS: `certbot --nginx -d api.bestbond.in` (or `certbot install` if cert exists).
@@ -52,6 +66,7 @@ If you disable Sparticuz, install system Chromium: `sudo bash scripts/ensure-chr
 Run from `/var/www/api.bestbond.in`:
 
 ```bash
+bash scripts/backup-production-db.sh   # always first
 git pull   # optional
 
 export PUPPETEER_SKIP_DOWNLOAD=1
@@ -137,6 +152,28 @@ If `bestbond.in` uses **3000**, this API must use **3001** in `.env.production` 
 ### CORS / HTTPS
 
 With nginx TLS, set `TRUST_PROXY=1` and include `https://admin.bestbond.in` in `CORS_ORIGINS`.
+
+### Customers see "Account not found" after deploy
+
+1. Confirm production uses the real DB (not repo-local `data.sqlite`):
+
+   ```bash
+   grep DB_PATH /var/www/api.bestbond.in/.env.production
+   ls -lah /home/bestbond/.local/share/reward-system/data.sqlite
+   ```
+
+   Live DB should be tens of MB with dozens of users — not ~500 KB with ~10 users.
+
+2. Restore the latest backup if the wrong file was used:
+
+   ```bash
+   cd /home/bestbond/.local/share/reward-system
+   ls -lt data.sqlite.backup-*
+   cp data.sqlite.backup-YYYY-MM-DDTHH-MM-SSZ data.sqlite
+   pm2 reload bestbond-reward-api --update-env
+   ```
+
+3. On startup the API logs `[DB] Using … — N users, M coupons`. If PM2 fails to start with a DB guard error, fix `DB_PATH` or restore backup before reloading.
 
 ### Coupon PDF returns 500 / “Internal server error”
 
