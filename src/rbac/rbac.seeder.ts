@@ -58,6 +58,10 @@ export class RbacSeeder implements OnModuleInit {
         key: 'rewards.manage',
         description: 'Superadmin: manage gift catalog and slab rewards',
       },
+      {
+        key: 'users.delete',
+        description: 'Superadmin: permanently delete user accounts',
+      },
     ] as const;
 
     for (const p of permissions) {

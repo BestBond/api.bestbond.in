@@ -607,6 +607,23 @@ export class AdminService {
     return { id: saved.id, status: saved.isActive ? 'ACTIVE' : 'SUSPENDED' };
   }
 
+  async deleteUserById(actorUserId: string, targetUserId: string) {
+    if (actorUserId === targetUserId) {
+      throw new ForbiddenException('You cannot delete your own account.');
+    }
+    const u = await this.usersRepo.findOne({
+      where: { id: targetUserId },
+      relations: { roles: true },
+    });
+    if (!u) throw new NotFoundException('User not found');
+    const roleNames = new Set((u.roles ?? []).map((r) => String(r.name).toUpperCase()));
+    if (roleNames.has('SUPERADMIN')) {
+      throw new ForbiddenException('Superadmin accounts cannot be deleted.');
+    }
+    await this.usersRepo.remove(u);
+    return { id: targetUserId, deleted: true };
+  }
+
   async getUserTransactions(params: {
     userId: string;
     period: 'THIS_MONTH' | 'ALL';

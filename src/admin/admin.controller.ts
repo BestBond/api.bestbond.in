@@ -187,6 +187,14 @@ export class AdminController {
     return this.admin.activateUserById(id);
   }
 
+  /** Super Admin — Permanently delete a user account */
+  @Delete('users/:id')
+  @RequirePermissions('users.delete')
+  deleteUser(@Req() req: Request, @Param('id') id: string) {
+    const auth = req.user as AuthUser;
+    return this.admin.deleteUserById(auth.id, id);
+  }
+
   /**
    * Super Admin — Transaction Ledger screen.
    * UI needs: user summary header, total balance, monthly scans count, transaction list.
