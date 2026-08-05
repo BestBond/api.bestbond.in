@@ -47,21 +47,37 @@ import { SupportModule } from './support/support.module';
             '[TypeORM] DATABASE_SYNCHRONIZE=true in production — schema auto-sync is ON. Set to false after bootstrap and use migrations for ongoing changes.',
           );
         }
+        const entities = [
+          User,
+          Role,
+          Permission,
+          Coupon,
+          PointsTransaction,
+          Reward,
+          Redemption,
+        ];
+        const engine = (
+          config.get<string>('DB_ENGINE') ?? 'sqlite'
+        ).toLowerCase();
+        if (engine === 'postgres') {
+          return {
+            type: 'postgres' as const,
+            host: config.get<string>('DB_HOST') ?? 'localhost',
+            port: Number(config.get<string>('DB_PORT') ?? 5432),
+            username: config.get<string>('DB_USERNAME'),
+            password: config.get<string>('DB_PASSWORD'),
+            database: config.get<string>('DB_NAME'),
+            entities,
+            synchronize,
+          };
+        }
         return {
           type: 'sqlite' as const,
           database: config.get<string>('DB_PATH') ?? 'data.sqlite',
           // Concurrent Nest requests share one SQLite connection; WAL reduces
           // "no such savepoint" failures under parallel profile/transactions loads.
           enableWAL: true,
-          entities: [
-            User,
-            Role,
-            Permission,
-            Coupon,
-            PointsTransaction,
-            Reward,
-            Redemption,
-          ],
+          entities,
           synchronize,
         };
       },

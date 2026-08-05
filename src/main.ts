@@ -92,7 +92,9 @@ async function bootstrap() {
   assertProductionEnv();
 
   const isProduction = process.env.NODE_ENV === 'production';
-  if (isProduction) {
+  const isSqlite = (process.env.DB_ENGINE ?? 'sqlite').toLowerCase() === 'sqlite';
+
+  if (isProduction && isSqlite) {
     const db = await assertProductionDatabase();
     Logger.log(
       `[DB] Using ${db.dbPath} — ${db.userCount} users, ${db.couponCount} coupons (${db.sizeBytes} bytes)`,
@@ -100,8 +102,11 @@ async function bootstrap() {
     );
   }
 
-  // Additive schema patch (nullable column only). Required when synchronize is off.
-  await ensureWalletExpiryColumn();
+  // Additive schema patch (nullable column only). SQLite-only — Postgres gets this
+  // column from the initial synchronize/migration instead. Required when synchronize is off.
+  if (isSqlite) {
+    await ensureWalletExpiryColumn();
+  }
 
   const app = await NestFactory.create(AppModule, {
     logger: isProduction ? ['error', 'warn', 'log'] : undefined,
