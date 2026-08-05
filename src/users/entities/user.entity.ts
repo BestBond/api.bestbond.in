@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Role } from '../../rbac/entities/role.entity';
+import { DATETIME_COLUMN_TYPE } from '../../database/column-types';
 
 @Entity({ name: 'users' })
 export class User {
@@ -56,7 +57,7 @@ export class User {
    * - SUPERADMIN is auto-approved at creation
    * - OPERATIONAL_ADMIN must be approved by SUPERADMIN before access is granted
    */
-  @Column({ name: 'staff_approved_at', type: 'datetime', nullable: true })
+  @Column({ name: 'staff_approved_at', type: DATETIME_COLUMN_TYPE, nullable: true })
   staffApprovedAt!: Date | null;
 
   @Column({ name: 'staff_approved_by', type: 'text', nullable: true })
@@ -66,7 +67,7 @@ export class User {
   loyaltyPoints!: number;
 
   /** When current wallet balance resets to 0 if unused (annual from signup). */
-  @Column({ name: 'wallet_points_expires_at', type: 'datetime', nullable: true })
+  @Column({ name: 'wallet_points_expires_at', type: DATETIME_COLUMN_TYPE, nullable: true })
   walletPointsExpiresAt!: Date | null;
 
   @ManyToMany(() => Role, (role) => role.users, { cascade: false })

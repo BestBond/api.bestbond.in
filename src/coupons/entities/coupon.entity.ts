@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { DATETIME_COLUMN_TYPE } from '../../database/column-types';
 
 export type CouponStatus = 'ACTIVE' | 'REDEEMED' | 'EXPIRED';
 
@@ -46,7 +47,7 @@ export class Coupon {
   @Column({ type: 'text', default: 'ACTIVE' })
   status!: CouponStatus;
 
-  @Column({ name: 'expires_at', type: 'datetime', nullable: true })
+  @Column({ name: 'expires_at', type: DATETIME_COLUMN_TYPE, nullable: true })
   expiresAt!: Date | null;
 
   @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
@@ -55,7 +56,7 @@ export class Coupon {
   @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
   redeemedBy!: User | null;
 
-  @Column({ name: 'redeemed_at', type: 'datetime', nullable: true })
+  @Column({ name: 'redeemed_at', type: DATETIME_COLUMN_TYPE, nullable: true })
   redeemedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
