@@ -147,9 +147,7 @@ export class PointsService {
       pointsDelta: params.points,
       title: params.title,
       site: params.site ?? null,
-      performedBy: params.performedByUserId
-        ? ({ id: params.performedByUserId } as User)
-        : null,
+      performedById: params.performedByUserId ?? null,
       reason: params.reason ?? null,
     });
     await txRepo.save(tx);

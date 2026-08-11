@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -36,8 +37,13 @@ export class PointsTransaction {
   @Column({ type: 'text', nullable: true })
   site!: string | null;
 
+  /** Raw FK, mapped alongside the relation below so it can be read without a join. */
+  @Column({ type: 'uuid', nullable: true })
+  performedById!: string | null;
+
   /** SuperAdmin who made a manual adjustment (ADMIN_ADJUSTMENT only). Null for all other types. */
   @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'performedById' })
   performedBy!: User | null;
 
   /** Required, audit-facing reason for ADMIN_ADJUSTMENT; null for all other types. */

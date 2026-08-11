@@ -7,7 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import type { AuthUser } from '../auth/auth-user';
 import { UsersService } from '../users/users.service';
 import { RbacService } from '../rbac/rbac.service';
@@ -684,13 +684,27 @@ export class AdminService {
 
     const listQb = this.txRepo
       .createQueryBuilder('t')
-      .leftJoinAndSelect('t.performedBy', 'performedBy')
       .where('t.userId = :userId', { userId: params.userId })
       .orderBy('t.created_at', 'DESC')
       .skip(params.skip)
       .take(params.take);
     applyDate(listQb);
     const txList = await listQb.getMany();
+
+    // Resolved separately (not via leftJoinAndSelect) — joining performedBy here
+    // breaks TypeORM's orderBy-with-join resolution (TypeError: reading 'databaseName').
+    const performedByIds = [
+      ...new Set(txList.map((t) => t.performedById).filter((id): id is string => Boolean(id))),
+    ];
+    const performedByNameById = new Map<string, string>();
+    if (performedByIds.length > 0) {
+      const admins = await this.usersRepo.find({
+        where: { id: In(performedByIds) },
+      });
+      for (const a of admins) {
+        performedByNameById.set(a.id, a.fullName?.trim() || a.email);
+      }
+    }
 
     return {
       user: {
@@ -712,8 +726,9 @@ export class AdminService {
         site: t.site,
         pointsDelta: t.pointsDelta,
         reason: t.reason,
-        performedByName:
-          t.performedBy?.fullName?.trim() || t.performedBy?.email || null,
+        performedByName: t.performedById
+          ? (performedByNameById.get(t.performedById) ?? null)
+          : null,
         createdAt: t.createdAt,
       })),
     };
