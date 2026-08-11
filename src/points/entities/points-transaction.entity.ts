@@ -12,7 +12,8 @@ export type PointsTransactionType =
   | 'COUPON_SCAN'
   | 'REWARD_REDEEM'
   | 'REDEMPTION_REFUND'
-  | 'POINTS_EXPIRE';
+  | 'POINTS_EXPIRE'
+  | 'ADMIN_ADJUSTMENT';
 
 @Entity({ name: 'points_transactions' })
 export class PointsTransaction {
@@ -34,6 +35,14 @@ export class PointsTransaction {
 
   @Column({ type: 'text', nullable: true })
   site!: string | null;
+
+  /** SuperAdmin who made a manual adjustment (ADMIN_ADJUSTMENT only). Null for all other types. */
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  performedBy!: User | null;
+
+  /** Required, audit-facing reason for ADMIN_ADJUSTMENT; null for all other types. */
+  @Column({ type: 'text', nullable: true })
+  reason!: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

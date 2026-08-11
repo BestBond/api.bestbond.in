@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import type { AuthUser } from '../auth/auth-user';
 import { RequireAnyPermissions } from '../auth/require-any-permissions.decorator';
 import { RequirePermissions } from '../auth/require-permissions.decorator';
+import { AdjustUserPointsDto } from './dto/adjust-user-points.dto';
 import { CreateDealerRedemptionDto } from './dto/create-dealer-redemption.dto';
 import { CreateOperationalAdminDto } from './dto/create-operational-admin.dto';
 import { SuspendUserDto } from './dto/suspend-user.dto';
@@ -193,6 +194,21 @@ export class AdminController {
   deleteUser(@Req() req: Request, @Param('id') id: string) {
     const auth = req.user as AuthUser;
     return this.admin.deleteUserById(auth.id, id);
+  }
+
+  /**
+   * Super Admin — manually credit points to a user (add-only, capped, reason required).
+   * Same route usable from the mobile app for any client holding `points.manage`.
+   */
+  @Post('users/:id/points/adjust')
+  @RequirePermissions('points.manage')
+  adjustUserPoints(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: AdjustUserPointsDto,
+  ) {
+    const auth = req.user as AuthUser;
+    return this.admin.adjustUserPoints(auth.id, id, dto);
   }
 
   /**

@@ -684,6 +684,7 @@ export class AdminService {
 
     const listQb = this.txRepo
       .createQueryBuilder('t')
+      .leftJoinAndSelect('t.performedBy', 'performedBy')
       .where('t.userId = :userId', { userId: params.userId })
       .orderBy('t.created_at', 'DESC')
       .skip(params.skip)
@@ -710,8 +711,43 @@ export class AdminService {
         title: t.title,
         site: t.site,
         pointsDelta: t.pointsDelta,
+        reason: t.reason,
+        performedByName:
+          t.performedBy?.fullName?.trim() || t.performedBy?.email || null,
         createdAt: t.createdAt,
       })),
+    };
+  }
+
+  /**
+   * Superadmin — manually credit a user's loyalty points. Add-only (no deduction),
+   * capped per-call by AdjustUserPointsDto, always requires a stored reason so
+   * every adjustment is traceable to the acting admin (audit trail).
+   */
+  async adjustUserPoints(
+    actorUserId: string,
+    targetUserId: string,
+    dto: { points: number; reason: string },
+  ) {
+    const u = await this.usersRepo.findOne({ where: { id: targetUserId } });
+    if (!u) throw new NotFoundException('User not found');
+
+    const { user, tx } = await this.points.credit({
+      userId: targetUserId,
+      points: dto.points,
+      title: 'Manual points adjustment by admin',
+      type: 'ADMIN_ADJUSTMENT',
+      performedByUserId: actorUserId,
+      reason: dto.reason,
+    });
+
+    return {
+      id: tx.id,
+      userId: user.id,
+      pointsAdded: dto.points,
+      newBalance: user.loyaltyPoints,
+      reason: dto.reason,
+      createdAt: tx.createdAt,
     };
   }
 

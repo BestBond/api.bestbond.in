@@ -119,6 +119,8 @@ export class PointsService {
       title: string;
       site?: string | null;
       type: PointsTransactionType;
+      performedByUserId?: string | null;
+      reason?: string | null;
     },
   ) {
     if (!Number.isFinite(params.points) || params.points === 0) {
@@ -145,6 +147,10 @@ export class PointsService {
       pointsDelta: params.points,
       title: params.title,
       site: params.site ?? null,
+      performedBy: params.performedByUserId
+        ? ({ id: params.performedByUserId } as User)
+        : null,
+      reason: params.reason ?? null,
     });
     await txRepo.save(tx);
 
@@ -157,6 +163,8 @@ export class PointsService {
     title: string;
     site?: string | null;
     type: PointsTransactionType;
+    performedByUserId?: string | null;
+    reason?: string | null;
   }) {
     if (!Number.isFinite(params.points) || params.points === 0) {
       throw new BadRequestException('Invalid points');

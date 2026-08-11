@@ -62,6 +62,10 @@ export class RbacSeeder implements OnModuleInit {
         key: 'users.delete',
         description: 'Superadmin: permanently delete user accounts',
       },
+      {
+        key: 'points.manage',
+        description: 'Superadmin: manually adjust a user\'s loyalty points balance',
+      },
     ] as const;
 
     for (const p of permissions) {
