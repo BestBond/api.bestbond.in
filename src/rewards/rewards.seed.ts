@@ -8,6 +8,10 @@ const LEGACY_TITLES = [
   'Worker Slab Reward - 10,000',
   'Worker Slab Reward - 25,000',
   'Industrial Putty Mixer Machine',
+  // Replaced 2026-11-07 by 'LAVA BOLD N4 LITE' at the same 20,000-point slot.
+  // Deactivated rather than renamed: redemptions join back to the live rewards
+  // row for title/image, so renaming would relabel past Samsung M06 orders.
+  'Samsung M06',
 ];
 
 const CATALOG: Array<{
@@ -92,11 +96,11 @@ const CATALOG: Array<{
     sortOrder: 70,
   },
   {
-    title: 'Samsung M06',
-    description: 'Samsung M06 smartphone reward.',
+    title: 'LAVA BOLD N4 LITE',
+    description: 'LAVA BOLD N4 LITE smartphone reward.',
     pointsCost: 20000,
     giftTier: 'WORKER',
-    imageFile: 'samsung_m06.png',
+    imageFile: 'lava_bold_n4_lite.png',
     sortOrder: 80,
   },
   {
